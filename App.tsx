@@ -1,0 +1,242 @@
+﻿// ============================================================================
+// FlagRisk app — root navigation (auth-aware) + theme provider.
+// ============================================================================
+
+import "react-native-url-polyfill/auto";
+import { FeedbackProvider, showAlert } from "./src/components/Feedback";
+import { TourProvider } from "./src/components/Tour";
+import { useEffect, useState } from "react";
+import * as ExpoSplash from "expo-splash-screen";
+ExpoSplash.preventAutoHideAsync().catch(() => {});
+import { ActivityIndicator, View, AppState } from "react-native";
+import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import * as Notifications from "expo-notifications";
+import { supabase } from "./lib/supabase";
+// Deep-link infrastructure: navigate from notification taps (outside components).
+import { navigationRef } from "./src/navigation/navRef";
+export { navigationRef };
+function goToRoute(route, params) {
+  if (!route) return;
+  if (navigationRef.isReady()) {
+    try { navigationRef.navigate(route, params); } catch (_e) {}
+  } else {
+    // navigator not mounted yet (cold start) -> retry briefly until ready
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      if (navigationRef.isReady()) {
+        clearInterval(iv);
+        try { navigationRef.navigate(route, params); } catch (_e) {}
+      } else if (tries > 40) {
+        clearInterval(iv); // give up after ~10s
+      }
+    }, 250);
+  }
+}
+
+// Records an app-open at the device's local hour, for dormant-user re-engagement
+// timing. Throttled to at most once per 10 minutes so genuine opens count without
+// inflating from rapid foreground flickers.
+
+// One-time welcome-back when a previously-dormant user returns. Reads state via
+// greet_returning_user (does NOT update activity), so it runs BEFORE the activity log.
+let _greetChecked = false;
+function maybeGreetReturningUser() {
+  if (_greetChecked) return;
+  _greetChecked = true;
+  supabase.rpc("greet_returning_user").then(({ data }) => {
+    const row = data && data.length ? data[0] : null;
+    if (!row || !row.should_greet) return;
+    let title = "Welcome back to FlagRisk";
+    let message = "Your safety circle and alerts are active again.";
+    if (row.has_location && row.nearby_count > 0) {
+      title = "Welcome back";
+      const n = row.nearby_count;
+      message = n + (n === 1 ? " safety report was" : " safety reports were") + " made near your location recently. Open the map to see what is happening.";
+    } else if (row.has_location && row.nearby_count === 0) {
+      title = "Welcome back";
+      message = "Your location has been calm recently.";
+    }
+    setTimeout(() => { showAlert({ title, message }); }, 1500);
+  }).catch(() => {});
+}
+
+let _lastActivityLog = 0;
+function logActivityThrottled() {
+  const now = Date.now();
+  if (now - _lastActivityLog < 600000) return;
+  _lastActivityLog = now;
+  try {
+    const d = new Date();
+    const hour = d.getHours();
+    const offset = d.getTimezoneOffset();
+    supabase.rpc("log_activity", { p_local_hour: hour, p_utc_offset_min: offset }).then(() => {}).catch(() => {});
+  } catch (_e) {}
+}
+
+import { registerForPush, logLocationOnce } from "./lib/push";
+import { ThemeProvider, useTheme } from "./src/theme/ThemeProvider";
+import { RiskCacheProvider, useRiskCache } from "./src/theme/RiskCache";
+import { SplashScreen } from "./src/screens/SplashScreen";
+import { OnboardingScreen } from "./src/screens/OnboardingScreen";
+import { CreateAccountScreen } from "./src/screens/CreateAccountScreen";
+import { SignInScreen } from "./src/screens/SignInScreen";
+import { MainTabs } from "./src/navigation/MainTabs";
+import { NetworkScreen } from "./src/screens/NetworkScreen";
+import { PanicScreen } from "./src/screens/PanicScreen";
+import { IncidentDetailScreen } from "./src/screens/IncidentDetailScreen";
+import { RiskBreakdownScreen } from "./src/screens/RiskBreakdownScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
+import { TripWatchScreen } from "./src/screens/TripWatchScreen";
+import { HelpScreen } from "./src/screens/HelpScreen";
+import { HelpArticleScreen } from "./src/screens/HelpArticleScreen";
+import { SupportScreen } from "./src/screens/SupportScreen";
+import { SupportThreadScreen } from "./src/screens/SupportThreadScreen";
+import "./src/tasks/tripTask";
+import { PlanPricingScreen } from "./src/screens/PlanPricingScreen";
+import { CheckoutScreen } from "./src/screens/CheckoutScreen";
+import { PaymentSuccessScreen } from "./src/screens/PaymentSuccessScreen";
+import { PaymentHistoryScreen } from "./src/screens/PaymentHistoryScreen";
+import { SavedPlacesScreen } from "./src/screens/SavedPlacesScreen";
+import { EditProfileScreen } from "./src/screens/EditProfileScreen";
+import { VideoCaptureScreen } from "./src/screens/VideoCaptureScreen";
+import { PhotoCaptureScreen } from "./src/screens/PhotoCaptureScreen";
+import { CheckInInboxScreen } from "./src/screens/CheckInInboxScreen";
+import { NetworkInvitesScreen } from "./src/screens/NetworkInvitesScreen";
+import { ChangePasswordScreen } from "./src/screens/ChangePasswordScreen";
+import { PhonebookScreen } from "./src/screens/PhonebookScreen";
+import { NetworkFlagDetailScreen } from "./src/screens/NetworkFlagDetailScreen";
+import { PanicInboxScreen } from "./src/screens/PanicInboxScreen";
+
+const Stack = createNativeStackNavigator();
+
+function Root() {
+  const { colors, mode } = useTheme();
+  const { ready: riskReady } = useRiskCache();
+  const [ready, setReady] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    // Deep-link: cold-start (app launched by tapping a notification).
+    Notifications.getLastNotificationResponseAsync().then((resp) => {
+      const d = resp && resp.notification && resp.notification.request &&
+        resp.notification.request.content ? resp.notification.request.content.data : null;
+      const route = d ? d.route : null;
+      const params = d && d.incidentId ? { incidentId: d.incidentId } : undefined;
+      if (route) goToRoute(route, params);
+    }).catch(() => {});
+    // Deep-link: warm tap (app running/backgrounded).
+    const respSub = Notifications.addNotificationResponseReceivedListener((resp) => {
+      const d = resp && resp.notification && resp.notification.request &&
+        resp.notification.request.content ? resp.notification.request.content.data : null;
+      const route = d ? d.route : null;
+      const params = d && d.incidentId ? { incidentId: d.incidentId } : undefined;
+      if (route) goToRoute(route, params);
+    });
+    supabase.auth.getSession().then(({ data }) => {
+      setSignedIn(!!data.session);
+      setReady(true);
+      if (data.session) { registerForPush(); logLocationOnce(); }
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSignedIn(!!session);
+      if (session) { registerForPush(); logLocationOnce(); }
+    });
+    // Opportunistic location refresh whenever the app returns to the foreground,
+    // so a signed-in user's location stays fresh from normal use (not only sign-in).
+    const appSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        supabase.auth.getSession().then(({ data }) => {
+          if (data.session) {
+            logLocationOnce();
+            maybeGreetReturningUser();
+            logActivityThrottled();
+          }
+        });
+      }
+    });
+    return () => { sub.subscription.unsubscribe(); appSub.remove(); respSub.remove(); };
+  }, []);
+
+  useEffect(() => {
+    if (ready && riskReady) { ExpoSplash.hideAsync().catch(() => {}); }
+  }, [ready, riskReady]);
+
+  const navTheme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: colors.bg } };
+
+  // While loading, keep the native splash (branded gradient) visible by rendering
+  // nothing underneath. The splash is hidden once the app is ready.
+  if (!ready || !riskReady) { return null; }
+
+  return (
+    <>
+      <StatusBar style={mode === "dark" ? "light" : "dark"} />
+      <FeedbackProvider><NavigationContainer ref={navigationRef} theme={navTheme}><TourProvider>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {signedIn ? (
+            <>
+              <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="Network" component={NetworkScreen} />
+              <Stack.Screen name="Panic" component={PanicScreen} />
+              <Stack.Screen name="IncidentDetail" component={IncidentDetailScreen} />
+              <Stack.Screen name="RiskBreakdown" component={RiskBreakdownScreen} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="TripWatch" component={TripWatchScreen} />
+        <Stack.Screen name="Help" component={HelpScreen} />
+        <Stack.Screen name="HelpArticle" component={HelpArticleScreen} />
+        <Stack.Screen name="Support" component={SupportScreen} />
+        <Stack.Screen name="SupportThread" component={SupportThreadScreen} />
+              <Stack.Screen name="PlanPricing" component={PlanPricingScreen} />
+              <Stack.Screen name="Checkout" component={CheckoutScreen} />
+              <Stack.Screen name="PaymentSuccess" component={PaymentSuccessScreen} />
+              <Stack.Screen name="PaymentHistory" component={PaymentHistoryScreen} />
+              <Stack.Screen name="SavedPlaces" component={SavedPlacesScreen} />
+              <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+              <Stack.Screen name="VideoCapture" component={VideoCaptureScreen} />
+              <Stack.Screen name="PhotoCapture" component={PhotoCaptureScreen} />
+              <Stack.Screen name="CheckInInbox" component={CheckInInboxScreen} />
+              <Stack.Screen name="NetworkInvites" component={NetworkInvitesScreen} />
+              <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+              <Stack.Screen name="Phonebook" component={PhonebookScreen} />
+              <Stack.Screen name="NetworkFlagDetail" component={NetworkFlagDetailScreen} />
+              <Stack.Screen name="PanicInbox" component={PanicInboxScreen} />
+            </>
+          ) : (
+            <>
+              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+              <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
+              <Stack.Screen name="SignIn" component={SignInScreen} />
+              <Stack.Screen name="Help" component={HelpScreen} />
+              <Stack.Screen name="HelpArticle" component={HelpArticleScreen} />
+            </>
+          )}
+        </Stack.Navigator>
+      </TourProvider></NavigationContainer></FeedbackProvider>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <RiskCacheProvider>
+          <Root />
+        </RiskCacheProvider>
+      </SafeAreaProvider>
+    </ThemeProvider>
+  );
+}
+
+
+
+
+
+
+
+
+

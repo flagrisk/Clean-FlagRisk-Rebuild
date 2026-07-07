@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1092156629640",
+    "project_id": "flagriskrebuild",
+    "storage_bucket": "flagriskrebuild.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1092156629640:android:d3632473baf6dab474353d",
+        "android_client_info": {
+          "package_name": "com.flagrisk.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpEwjsWe32jV7Psxf42vZn_sauogLACpY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
