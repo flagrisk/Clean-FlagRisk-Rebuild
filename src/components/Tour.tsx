@@ -114,7 +114,7 @@ function TourCard({ step, onNext, onBack, onEnd }) {
   const isLast = step === STEPS.length - 1;
   return (
     <View style={styles.overlay} pointerEvents="box-none">
-      <View style={[styles.card, { backgroundColor: glass.surface, borderColor: glass.stroke, marginBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.card, { backgroundColor: colors.bgElevated, borderColor: glass.stroke, marginBottom: insets.bottom + spacing.md }]}>
         <View style={styles.progressRow}>
           {STEPS.map((_, i) => (
             <View key={i} style={[styles.dot, { backgroundColor: i === step ? colors.accentOn : glass.stroke }]} />

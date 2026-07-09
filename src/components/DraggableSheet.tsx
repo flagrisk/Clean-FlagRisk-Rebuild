@@ -1,7 +1,7 @@
 ﻿// BottomSheet (theme-aware). Tap dark area to dismiss. Bottom padding = real
 // safe-area inset passed from the screen + base margin.
 import { ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing } from "../theme";
 
@@ -16,6 +16,7 @@ export function DraggableSheet({
   const sheetBg = mode === "light" ? "#ffffff" : "#121419";
   return (
     <Pressable style={styles.backdrop} onPress={onDismiss}>
+      <KeyboardAvoidingView behavior="padding" style={styles.kav} pointerEvents="box-none">
       <Pressable style={[styles.sheet, { backgroundColor: sheetBg, borderColor: glass.stroke, paddingBottom: pad }]} onPress={() => {}}>
         <View style={[styles.grabber, { backgroundColor: mode === "light" ? "rgba(0,0,0,0.20)" : "rgba(255,255,255,0.25)" }]} />
         {title ? <Text style={[styles.title, { color: colors.text }]}>{title}</Text> : null}
@@ -25,12 +26,14 @@ export function DraggableSheet({
         </ScrollView>
         <Text style={[styles.dismissHint, { color: colors.textFaint }]}>Tap outside to close</Text>
       </Pressable>
+      </KeyboardAvoidingView>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  kav: { flex: 1, width: "100%", justifyContent: "flex-end" },
   sheet: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md, maxHeight: "85%" },
   grabber: { width: 44, height: 5, borderRadius: 3, alignSelf: "center", marginBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", textAlign: "center" },

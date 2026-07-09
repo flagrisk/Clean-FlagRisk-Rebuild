@@ -9,6 +9,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { ClipboardList, Paperclip, X } from "lucide-react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { supabase } from "../../lib/supabase";
+import { showAlert } from "../components/Feedback";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing } from "../theme";
 import { humanize, scoreBand } from "../format";
@@ -67,6 +68,12 @@ export function ReportsScreen() {
     })();
   }, []));
 
+  async function openEvidence(path: string) {
+    const { data, error } = await supabase.storage.from("report-evidence").createSignedUrl(path, 3600);
+    if (error || !data) { showAlert({ title: "Could not open", message: "This evidence is unavailable right now." }); return; }
+    setViewing(data.signedUrl);
+  }
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
       <Text style={[styles.header, { color: colors.text }]}>My Reports</Text>
@@ -92,7 +99,7 @@ export function ReportsScreen() {
                 <View style={styles.cardTop}>
                   <Text style={[styles.cat, { color: colors.text }]}>{humanize(item.category_id)}</Text>
                   {item.media_url ? (
-                    <Pressable onPress={() => setViewing(item.media_url)} style={[styles.badge, { backgroundColor: colors.accentOn + "22", borderColor: colors.accentOn }]}>
+                    <Pressable onPress={() => openEvidence(item.media_url!)} style={[styles.badge, { backgroundColor: colors.accentOn + "22", borderColor: colors.accentOn }]}>
                       <Paperclip size={13} color={colors.accentOn} strokeWidth={2.5} />
                       <Text style={[styles.badgeText, { color: colors.accentOn }]}>Attached</Text>
                     </Pressable>

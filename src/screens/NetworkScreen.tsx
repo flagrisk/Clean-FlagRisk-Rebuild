@@ -14,6 +14,7 @@ import { Avatar } from "../components/Avatar";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing } from "../theme";
 import { DraggableSheet } from "../components/DraggableSheet";
+import { PhoneInput } from "../components/PhoneInput";
 
 type Member = {
   member_id: string; display_name: string | null; avatar_url?: string | null;
@@ -43,6 +44,7 @@ export function NetworkScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [dial, setDial] = useState("+234");
+  const [phone, setPhone] = useState("");
   const [dialOpen, setDialOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
@@ -75,7 +77,7 @@ export function NetworkScreen() {
     if (addMode === "email") {
       contact = email.trim(); isEmail = true;
     } else {
-      const digits = email.replace(/[^0-9]/g, "");
+      const digits = phone.replace(/[^0-9]/g, "");
       if (!digits) { if (uid) showAlert({ title: "Enter a number", message: "Please enter a phone number.", tone: "error" }); return; }
       // strip a leading 0 then prefix the chosen dial code -> full international number
       contact = dial + digits.replace(/^0+/, "");
@@ -244,26 +246,8 @@ export function NetworkScreen() {
               placeholder="Email address" placeholderTextColor={colors.textMuted}
               autoCapitalize="none" keyboardType="email-address" />
           ) : (
-            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
-              <Pressable onPress={() => setDialOpen((v) => !v)}
-                style={[styles.dialBtn, { borderColor: glass.stroke, backgroundColor: glass.surface }]}>
-                <Text style={[styles.dialText, { color: colors.text }]}>{dial}</Text>
-                <ChevronDown size={16} color={colors.textMuted} />
-              </Pressable>
-              <TextInput
-                style={[styles.input, { flex: 1, marginTop: 0, borderColor: glass.stroke, backgroundColor: glass.surface, color: colors.text }]}
-                value={email} onChangeText={setEmail}
-                placeholder="Phone number" placeholderTextColor={colors.textMuted}
-                keyboardType="phone-pad" />
-            </View>
-          )}
-          {dialOpen && addMode === "manual" && (
-            <View style={[styles.dialList, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-              {DIAL_CODES.map((d) => (
-                <Pressable key={d} style={styles.dialItem} onPress={() => { setDial(d); setDialOpen(false); }}>
-                  <Text style={[styles.dialText, { color: d === dial ? colors.accentOn : colors.text }]}>{d}</Text>
-                </Pressable>
-              ))}
+            <View style={{ marginTop: spacing.md }}>
+              <PhoneInput dial={dial} number={phone} onChangeDial={setDial} onChangeNumber={setPhone} placeholder="Phone number" />
             </View>
           )}
           <Pressable style={styles.addWrap} onPress={addMember} disabled={adding}>

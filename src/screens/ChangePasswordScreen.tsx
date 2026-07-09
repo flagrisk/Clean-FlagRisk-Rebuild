@@ -1,7 +1,7 @@
 ﻿// Change Password. In-app form (auth.updateUser) with a reset-email fallback.
 import { useState } from "react";
 import { showAlert } from "../components/Feedback";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -43,7 +43,8 @@ export function ChangePasswordScreen() {
           <ChevronLeft size={22} color={colors.text} strokeWidth={2} /><Text style={[styles.back, { color: colors.text }]}>Settings</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={{ padding: spacing.lg }} keyboardShouldPersistTaps="handled">
         <Text style={[styles.header, { color: colors.text }]}>Change password</Text>
         <Text style={[styles.sub, { color: colors.textMuted }]}>Enter a new password for your account.</Text>
 
@@ -65,6 +66,7 @@ export function ChangePasswordScreen() {
           <Text style={[styles.resetLink, { color: colors.accentOn }]}>Send me a reset email instead</Text>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

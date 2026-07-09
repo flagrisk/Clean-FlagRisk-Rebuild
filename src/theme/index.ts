@@ -82,6 +82,11 @@ export const darkGradients = {
   heroMedium: ["rgba(255,176,32,0.22)", "rgba(43,214,168,0.10)"] as const,
   heroHigh: ["rgba(255,90,95,0.24)", "rgba(255,176,32,0.08)"] as const,
   heroLow: ["rgba(52,224,161,0.22)", "rgba(43,214,168,0.06)"] as const,
+  tileScoreLow: ["#1f6f4a", "#34e0a1"] as const,
+  tileScoreMedium: ["#a35a00", "#ffb020"] as const,
+  tileScoreHigh: ["#b23a3f", "#ff5a5f"] as const,
+  tileAlarm: ["#7a2740", "#c2425a"] as const,
+  tileNetwork: ["#0e5a48", "#23b48f"] as const,
 };
 export const lightGradients = {
   brand: brandGradient,
