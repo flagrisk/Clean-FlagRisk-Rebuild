@@ -74,6 +74,10 @@ export function MapFlagScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  // When several incidents sit on (nearly) the same coordinate, the top marker's
+  // onPress wins and the ones beneath are untappable. This holds the stack so the
+  // user can pick which one to open.
+  const [stackPick, setStackPick] = useState<Incident[] | null>(null);
 
   const enableLocation = useCallback(async () => {
     try {
@@ -95,7 +99,7 @@ export function MapFlagScreen() {
   }, []);
 
   const loadIncidents = useCallback(async (lat: number, lng: number) => {
-    const { data } = await supabase.rpc("incidents_near", { p_lat: lat, p_lng: lng, p_radius_km: 50 });
+    const { data } = await supabase.rpc("incidents_all");
     if (data) setIncidents(data);
   }, []);
 
@@ -170,13 +174,38 @@ export function MapFlagScreen() {
   }, [loadIncidents]));
 
   // Tap-and-reveal: one tap sets the point AND opens the reporting sheet.
-  function onMapPress(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) {
+  function onMapPress(e: any) {
+    // Ignore taps that landed on a marker — those open the incident, not a report.
+    if (e?.nativeEvent?.action === "marker-press") return;
     if (picked) return;
     const { latitude, longitude } = e.nativeEvent.coordinate;
     setPicked({ lat: latitude, lng: longitude });
   }
 
   function closeSheet() { setPicked(null); }
+
+  // Metres between two lat/lng points (haversine).
+  function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
+    const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+    const s = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  // Tapping an incident marker. If others are stacked within ~150 m of it, the ones
+  // beneath are otherwise untappable, so open a chooser. If it stands alone, open it.
+  function onIncidentPress(tapped: Incident) {
+    const STACK_M = 150;
+    const cluster = incidents.filter(
+      (i) => metresBetween(tapped.latitude, tapped.longitude, i.latitude, i.longitude) <= STACK_M
+    );
+    if (cluster.length <= 1) {
+      navigation.navigate("IncidentDetail", { incidentId: tapped.id });
+    } else {
+      setStackPick(cluster);
+    }
+  }
   function resetAll() { setPicked(null); setSelectedMembers([]); }
   function toggleMember(id: string) {
     setSelectedMembers((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
@@ -235,7 +264,7 @@ export function MapFlagScreen() {
             const confirmed = i.display_state === "confirmed";
             return (
               <Marker key={i.id} coordinate={{ latitude: i.latitude, longitude: i.longitude }} anchor={{ x: 0.5, y: 0.5 }}
-                onPress={() => navigation.navigate("IncidentDetail", { incidentId: i.id })}>
+                onPress={() => onIncidentPress(i)}>
                 <View style={styles.incidentHit}>
                   <View style={[styles.incidentDot, { borderColor: dotColor }, confirmed ? { backgroundColor: dotColor } : { backgroundColor: "transparent" }]} />
                 </View>
@@ -376,6 +405,36 @@ export function MapFlagScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={!!stackPick} transparent animationType="slide" onRequestClose={() => setStackPick(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setStackPick(null)}>
+          <Pressable style={[styles.sheet, { backgroundColor: sheetBg, borderColor: glass.stroke, paddingBottom: insets.bottom + spacing.xl + spacing.lg }]} onPress={() => {}}>
+            <View style={[styles.grabber, { backgroundColor: mode === "light" ? "rgba(0,0,0,0.20)" : "rgba(255,255,255,0.25)" }]} />
+            <Text style={[styles.sheetTitle, { color: colors.text }]}>{(stackPick?.length ?? 0)} incidents here</Text>
+            <Text style={[styles.sheetLoc, { color: colors.textMuted }]}>Several reports are at this spot. Choose one to view.</Text>
+            <ScrollView contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}>
+              {(stackPick ?? []).map((i) => {
+                const dc = SEVERITY_COLORS[i.severity ?? ""] ?? "#ff5a5f";
+                const label = (i.category_id ?? "incident").replace(/_/g, " ");
+                return (
+                  <Pressable key={i.id}
+                    onPress={() => { setStackPick(null); navigation.navigate("IncidentDetail", { incidentId: i.id }); }}
+                    style={[styles.memberRow, { borderColor: glass.stroke, backgroundColor: glass.surface }]}>
+                    <View style={[styles.incidentDot, { borderColor: dc, backgroundColor: i.display_state === "confirmed" ? dc : "transparent" }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.mName, { color: colors.text, textTransform: "capitalize" }]}>{label}</Text>
+                      <Text style={[styles.outOfRange, { color: colors.textMuted, textTransform: "capitalize" }]}>
+                        {(i.severity ?? "unknown")}{i.display_state ? " - " + i.display_state.replace(/_/g, " ") : ""}
+                      </Text>
+                    </View>
+                    <TriangleAlert size={18} color={dc} strokeWidth={2} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -413,6 +472,14 @@ const styles = StyleSheet.create({
   outOfRange: { fontSize: 12, marginTop: 2, fontWeight: "600" },
   checkBox: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: "center", justifyContent: "center" },
 });
+
+
+
+
+
+
+
+
 
 
 

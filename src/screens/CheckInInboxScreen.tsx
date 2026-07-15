@@ -1,7 +1,7 @@
 ﻿// Check-in Inbox. Roster of people who have YOU in their panic circle; tap one
 // to see their filterable check-in trail. Read-only; powered by definer RPCs.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ChevronLeft, MapPin, Inbox as InboxIcon } from "lucide-react-native";
@@ -34,6 +34,7 @@ export function CheckInInboxScreen() {
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<Sender | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [notifyPref, setNotifyPref] = useState(false);
   const [placeNames, setPlaceNames] = useState<Record<string, string>>({});
   const [hasNew, setHasNew] = useState(false);
   const recheckRunning = useRef(false);
@@ -60,6 +61,11 @@ export function CheckInInboxScreen() {
 
   async function openTrail(s: Sender, f: Filter = "all") {
     setActive(s); setFilter(f);
+    // Load this watcher's check-in push preference for this traveler.
+    try {
+      const { data: pref } = await supabase.rpc("get_checkin_push_pref", { p_traveler: s.sender_id });
+      setNotifyPref(pref === true);
+    } catch (_e) { setNotifyPref(false); }
     let since: string | null = null;
     if (f === "today") since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
     if (f === "week") since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
@@ -99,6 +105,16 @@ export function CheckInInboxScreen() {
     return () => clearInterval(id);
   }, [active, filter]);
 
+  async function toggleNotify(next: boolean) {
+    if (!active) return;
+    setNotifyPref(next); // optimistic
+    try {
+      await supabase.rpc("set_checkin_push_pref", { p_traveler: active.sender_id, p_notify: next });
+    } catch (_e) {
+      setNotifyPref(!next); // revert on failure
+    }
+  }
+
   // ---- Trail view ----
   if (active) {
     const ac = avatarColor(active.sender_id);
@@ -112,6 +128,15 @@ export function CheckInInboxScreen() {
         <View style={styles.trailHead}>
           <Avatar uri={active.avatar_url} name={active.display_name} id={active.sender_id} size={48} />
           <Text style={[styles.trailName, { color: colors.text }]}>{active.display_name ?? "FlagRisk user"}</Text>
+          <View style={[styles.notifyRow, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+            <Text style={[styles.notifyLabel, { color: colors.text }]}>Notify me when they check in</Text>
+            <Switch
+              value={notifyPref}
+              onValueChange={toggleNotify}
+              trackColor={{ false: glass.stroke, true: colors.accentOn }}
+              thumbColor={"#ffffff"}
+            />
+          </View>
         </View>
         <View style={styles.filterRow}>
           {(["all", "today", "week"] as Filter[]).map((f) => (
@@ -209,6 +234,8 @@ const styles = StyleSheet.create({
   meta: { fontSize: 13, marginTop: 3 },
   trailHead: { alignItems: "center", gap: 10, paddingVertical: spacing.md },
   trailName: { fontSize: 20, fontWeight: "800" },
+  notifyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, marginTop: spacing.sm, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderRadius: radius.md, alignSelf: "stretch", marginHorizontal: spacing.lg },
+  notifyLabel: { fontSize: 14, fontWeight: "600", flex: 1 },
   filterRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   chip: { paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
   chipText: { fontSize: 13, fontWeight: "700" },

@@ -9,12 +9,27 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { supabase } from "./supabase";
+import { goToRoute } from "../src/navigation/navRef";
 
 // Show notifications while the app is foregrounded too.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
   }),
+});
+
+// When the user TAPS a push, route to the screen carried in its data payload.
+// The route is set server-side by pending_push_notifications (kind -> route) and
+// delivered by send-push in the push data. Falls back to no-op if absent.
+Notifications.addNotificationResponseReceivedListener((response) => {
+  try {
+    const data = (response && response.notification && response.notification.request
+      && response.notification.request.content && response.notification.request.content.data) || {};
+    const route = data.route;
+    if (route && typeof route === "string") {
+      goToRoute(route);
+    }
+  } catch (_e) {}
 });
 
 export async function registerForPush() {

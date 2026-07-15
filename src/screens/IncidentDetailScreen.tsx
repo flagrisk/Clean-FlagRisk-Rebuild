@@ -11,7 +11,7 @@ import { useFocusEffect, useRoute, useNavigation } from "@react-navigation/nativ
 import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
 import { compassDirection, reverseGeocode } from "../../lib/geo";
-import { MiniMap } from "../components/MiniMap";
+import { MiniMap, type RefugePlace } from "../components/MiniMap";
 import { useTheme } from "../theme/ThemeProvider";
 import { ShieldCheck, Sparkles, Siren, ChevronLeft } from "lucide-react-native";
 import { radius, spacing } from "../theme";
@@ -103,10 +103,16 @@ export function IncidentDetailScreen() {
 
   const [d, setD] = useState<Detail | null>(null);
   const [dist, setDist] = useState<number | null>(null);
+  const [distStatus, setDistStatus] = useState<"calculating" | "ready" | "unavailable">("calculating");
   const [place, setPlace] = useState<string | null>(null);
   const [direction, setDirection] = useState<string | null>(null);
   const [aiSteps, setAiSteps] = useState<string[] | null>(null);
   const [aiSources, setAiSources] = useState<Source[]>([]);
+  const [aiPlaces, setAiPlaces] = useState<RefugePlace[]>([]);
+  // Advice loading state, so we never show generic steps and THEN swap them for the
+  // AI advice - changing safety instructions after the user has read them is a real
+  // hazard. "loading" until we know; then "ai" or "fallback", never one then the other.
+  const [adviceStatus, setAdviceStatus] = useState<"loading" | "ai" | "fallback">("loading");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -125,8 +131,12 @@ export function IncidentDetailScreen() {
         const dm = distanceM(userLat, userLng, detail.latitude, detail.longitude);
         setDist(dm);
         setDirection(compassDirection(userLat, userLng, detail.latitude, detail.longitude));
+        setDistStatus("ready");
+      } else {
+        // Location off: distance genuinely cannot be computed.
+        setDistStatus("unavailable");
       }
-    } catch { /* distance optional */ }
+    } catch { setDistStatus("unavailable"); /* distance optional */ }
     const placeName = await reverseGeocode(detail.latitude, detail.longitude);
     setPlace(placeName);
     // AI advisory: grounded in Google Maps, cached per-incident server-side.
@@ -141,8 +151,13 @@ export function IncidentDetailScreen() {
       if (j.ok && Array.isArray(j.suggestions) && j.suggestions.length) {
         setAiSteps(j.suggestions);
         setAiSources(Array.isArray(j.sources) ? j.sources : []);
+        // Real, verified refuges (Google Places, within 1km, never invented).
+        setAiPlaces(Array.isArray(j.places) ? j.places : []);
+        setAdviceStatus("ai");
+      } else {
+        setAdviceStatus("fallback");
       }
-    } catch { /* enrichment optional */ }
+    } catch { setAdviceStatus("fallback"); /* enrichment optional */ }
   }, [incidentId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -196,7 +211,11 @@ export function IncidentDetailScreen() {
         <View style={[styles.proximityCard, { backgroundColor: glass.surface, borderLeftColor: colors.danger }]}>
           <View style={styles.proximityDistRow}>
             <Text style={[styles.proximityDist, { color: colors.text }]}>
-              {dist != null ? prettyDistance(dist) : "Distance unavailable"}
+              {dist != null
+                ? prettyDistance(dist)
+                : distStatus === "unavailable"
+                  ? "Distance unavailable"
+                  : "Calculating distance\u2026"}
             </Text>
             {direction ? <View style={[styles.inlineDot, { backgroundColor: colors.textMuted }]} /> : null}
             {direction ? <Text style={[styles.proximityDist, { color: colors.text }]}>{direction}</Text> : null}
@@ -205,24 +224,42 @@ export function IncidentDetailScreen() {
           <Text style={[styles.proximityTime, { color: colors.textMuted }]}>Flagged {timeAgo(d.created_at)}</Text>
         </View>
 
-        <MiniMap lat={d.latitude} lng={d.longitude} />
-        <Text style={[styles.mapNote, { color: colors.textMuted }]}>Exact flagged location</Text>
+        <MiniMap lat={d.latitude} lng={d.longitude} places={aiPlaces} />
+        <Text style={[styles.mapNote, { color: colors.textMuted }]}>
+          {aiPlaces.length > 0
+            ? "Red is the flagged risk. Green are safe places nearby - tap one to open it in Maps."
+            : "Exact flagged location"}
+        </Text>
 
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
-        <View style={[styles.stepsCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-          {steps.map((s, i) => (
-            <View key={i} style={styles.stepRow}>
-              <Text style={[styles.stepNum, { color: colors.accentText, backgroundColor: colors.accent }]}>{i + 1}</Text>
-              <Text style={[styles.stepText, { color: colors.text }]}>{s}</Text>
-            </View>
-          ))}
-        </View>
-
-        {aiSteps && aiSteps.length > 0 && (
+        {/* Three states, never a swap. While the advisory is being fetched we show a
+            neutral loading line rather than generic steps that would then be replaced -
+            changing safety advice under the user's eyes is a hazard. Then either the
+            AI advisory (grounded in real nearby places) OR the generic fallback. */}
+        {adviceStatus === "loading" ? (
           <>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><Sparkles size={19} color={colors.accentOn} strokeWidth={2} /><Text style={[styles.aiHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Context-aware suggestions</Text></View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
+            <View style={[styles.stepsCard, { backgroundColor: glass.surface, borderColor: glass.stroke, flexDirection: "row", alignItems: "center", gap: 10 }]}>
+              <ActivityIndicator size="small" color={colors.accentOn} />
+              <Text style={[styles.stepText, { color: colors.textMuted }]}>Finding safe places nearby...</Text>
+            </View>
+          </>
+        ) : adviceStatus === "fallback" ? (
+          <>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
+            <View style={[styles.stepsCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+              {steps.map((s, i) => (
+                <View key={i} style={styles.stepRow}>
+                  <Text style={[styles.stepNum, { color: colors.accentText, backgroundColor: colors.accent }]}>{i + 1}</Text>
+                  <Text style={[styles.stepText, { color: colors.text }]}>{s}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
             <View style={[styles.aiCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-              {aiSteps.map((s, i) => (
+              {(aiSteps ?? []).map((s, i) => (
                 <View key={i} style={styles.stepRow}>
                   <View style={[styles.aiDot, { backgroundColor: colors.accentOn }]} />
                   <Text style={[styles.stepText, { color: colors.text }]}>{s}</Text>
@@ -306,3 +343,6 @@ const styles = StyleSheet.create({
   inlineDotSm: { width: 3, height: 3, borderRadius: 1.5, marginHorizontal: 6 },
   tally: { fontSize: 13 },
 });
+
+
+

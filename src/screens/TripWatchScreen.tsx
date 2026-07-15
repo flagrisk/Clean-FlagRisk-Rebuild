@@ -64,6 +64,7 @@ export function TripWatchScreen() {
   const [customMins, setCustomMins] = useState("");
   const [dest, setDest] = useState(null);
   const [starting, setStarting] = useState(false);
+  const [checking, setChecking] = useState(false);
   const mapRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -78,7 +79,8 @@ export function TripWatchScreen() {
       .from("trips")
       .select("id, status, interval_minutes, recipient_ids, started_at, last_check_in_at, planned_end_at")
       .eq("user_id", id)
-      .eq("status", "active")
+      .in("status", ["active", "overdue", "escalated"])
+      .order("started_at", { ascending: false })
       .limit(1);
     setActive(trips && trips.length > 0 ? trips[0] : null);
     const { data: mem } = await supabase.rpc("my_network_members", { p_owner: id });
@@ -178,6 +180,41 @@ export function TripWatchScreen() {
     }
   }
 
+  async function confirmSafe() {
+    if (!active || checking) return;
+    setChecking(true);
+    try {
+      let lat = null; let lng = null;
+      const fg = await Location.getForegroundPermissionsAsync();
+      // Try last-known first (instant), so the check-in is fast. Fall back to a
+      // fresh fix only if there is no cached position.
+      if (fg.status === "granted") {
+        const last = await Location.getLastKnownPositionAsync().catch(() => null);
+        if (last) { lat = last.coords.latitude; lng = last.coords.longitude; }
+        if (lat == null || lng == null) {
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+          if (pos) { lat = pos.coords.latitude; lng = pos.coords.longitude; }
+        }
+      }
+      if (lat == null || lng == null) {
+        setChecking(false);
+        showAlert({ title: "Location needed", message: "We could not get your location to check in. Please try again where location is available.", tone: "error" });
+        return;
+      }
+      const wasEscalated = active.status === "escalated";
+      const { error } = await supabase.rpc("send_trip_check_in", {
+        p_trip_id: active.id, p_lat: lat, p_lng: lng, p_recorded_at: new Date().toISOString(),
+      });
+      if (error) { setChecking(false); showAlert({ title: "Could not check in", message: error.message, tone: "error" }); return; }
+      setChecking(false);
+      showAlert({ title: "Checked in", message: wasEscalated ? "Your circle has been told you are safe." : "You are safe. Your circle will not be alarmed.", tone: "success" });
+      load();
+    } catch (e) {
+      setChecking(false);
+      showAlert({ title: "Could not check in", message: String(e), tone: "error" });
+    }
+  }
+
   async function stopTrip() {
     if (!active) return;
     showAlert({
@@ -245,6 +282,24 @@ export function TripWatchScreen() {
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
         {Header}
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
+          {(active.status === "overdue" || active.status === "escalated") ? (
+            <View style={[styles.safeBanner, { borderColor: active.status === "escalated" ? colors.danger : "#c98a00", backgroundColor: (active.status === "escalated" ? colors.danger : "#c98a00") + "14" }]}>
+              <Text style={[styles.safeBannerTitle, { color: active.status === "escalated" ? colors.danger : "#c98a00" }]}>
+                {active.status === "escalated" ? "Your circle has been alerted" : "We have not heard from you"}
+              </Text>
+              <Text style={[styles.safeBannerBody, { color: colors.text }]}>
+                {active.status === "escalated"
+                  ? "We lost contact and told your circle. Check in to let them know you are safe."
+                  : "Check in to confirm you are safe and stop your circle being alerted."}
+              </Text>
+              <Pressable onPress={confirmSafe} disabled={checking} style={{ marginTop: spacing.sm }}>
+                <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.safeBtn, checking && { opacity: 0.7 }]}>
+                  <ShieldCheck size={18} color={colors.accentText} strokeWidth={2.5} />
+                  <Text style={[styles.safeBtnText, { color: colors.accentText }]}>{checking ? "Checking in..." : "I am safe, check in"}</Text>
+                </LinearGradient>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={[styles.card, { backgroundColor: glass.surface, borderColor: colors.accentOn }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View style={[styles.pulse, { backgroundColor: colors.accentOn }]} />
@@ -378,6 +433,11 @@ export function TripWatchScreen() {
 }
 
 const styles = StyleSheet.create({
+  safeBanner: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.lg },
+  safeBannerTitle: { fontSize: 16, fontWeight: "800" },
+  safeBannerBody: { fontSize: 14, marginTop: 4, lineHeight: 20 },
+  safeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: radius.md },
+  safeBtnText: { fontSize: 15, fontWeight: "800" },
   safe: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   headerTitle: { fontSize: 20, fontWeight: "800", marginLeft: 4 },
