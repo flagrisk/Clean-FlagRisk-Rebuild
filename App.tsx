@@ -183,7 +183,7 @@ function Root() {
               <Stack.Screen name="Network" component={NetworkScreen} />
               <Stack.Screen name="Panic" component={PanicScreen} />
               <Stack.Screen name="IncidentDetail" component={IncidentDetailScreen} />
-              <Stack.Screen name="RiskBreakdown" component={RiskBreakdownScreen} />
+              <Stack.Screen name="RiskBreakdown" component={RiskBreakdownScreen} options={{ presentation: "transparentModal", animation: "slide_from_bottom" }} />
               <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="TripWatch" component={TripWatchScreen} />
         <Stack.Screen name="Help" component={HelpScreen} />
@@ -207,9 +207,9 @@ function Root() {
             </>
           ) : (
             <>
+              <Stack.Screen name="SignIn" component={SignInScreen} />
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
               <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
-              <Stack.Screen name="SignIn" component={SignInScreen} />
               <Stack.Screen name="Help" component={HelpScreen} />
               <Stack.Screen name="HelpArticle" component={HelpArticleScreen} />
             </>
@@ -231,6 +231,8 @@ export default function App() {
     </ThemeProvider>
   );
 }
+
+
 
 
 

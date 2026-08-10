@@ -1,12 +1,15 @@
-﻿// Payment Success (V2, UI-only). Confirmation after mock checkout.
+// ============================================================================
+// Payment Success - FlagRisk v2.1
+// Designed, not rebuilt: no mockup exists for commerce.
+// Ink confirmation disc with a lime tick, the plan named, the amount, and the
+// two exits. No gradients, no glow.
+// ============================================================================
 import { useEffect, useRef } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import { Check } from "lucide-react-native";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { colors, radius, spacing, type } from "../theme";
 
 function naira(n: number) { return "NGN " + n.toLocaleString(); }
 
@@ -14,47 +17,40 @@ export function PaymentSuccessScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { tierName, price, period } = route.params ?? {};
-  const { colors, gradients, glow } = useTheme();
 
-  const scale = useRef(new Animated.Value(0.6)).current;
+  const scale = useRef(new Animated.Value(0.7)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(scale, { toValue: 1, duration: 500, easing: Easing.out(Easing.back(2)), useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 450, easing: Easing.out(Easing.back(1.6)), useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 380, useNativeDriver: true }),
     ]).start();
   }, []);
 
   const periodLabel = period === "monthly" ? "month" : "year";
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <View style={styles.center}>
-        <Animated.View style={{ transform: [{ scale }], opacity }}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.badge, { boxShadow: glow.brand } as any]}>
-            <Check size={56} color={colors.accentText} strokeWidth={3} />
-          </LinearGradient>
+        <Animated.View style={[styles.badge, { transform: [{ scale }], opacity }]}>
+          <Check size={48} color={colors.accent} strokeWidth={3} />
         </Animated.View>
-        <Text style={[styles.title, { color: colors.text }]}>You are on {tierName}</Text>
-        <Text style={[styles.sub, { color: colors.textMuted }]}>
+        <Text style={styles.title}>You are on {tierName}</Text>
+        <Text style={styles.sub}>
           Payment of {naira(price)} received. Your plan renews every {periodLabel}.
         </Text>
-        <View style={[styles.receipt, { borderColor: colors.accentOn + "44", backgroundColor: colors.accentOn + "12" }]}>
-          <Text style={[styles.receiptText, { color: colors.accentOn }]}>A receipt is in your Payment history.</Text>
+        <View style={styles.receipt}>
+          <Text style={styles.receiptText}>A receipt is in your payment history.</Text>
         </View>
       </View>
 
-      <View style={{ padding: spacing.lg, gap: spacing.md }}>
-        <Pressable onPress={() => navigation.navigate("Main", { screen: "Home" })}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.primaryBtn, { boxShadow: glow.brand } as any]}>
-            <Text style={[styles.primaryText, { color: colors.accentText }]}>Back to home</Text>
-          </LinearGradient>
+      <View style={styles.footer}>
+        <Pressable style={styles.primaryBtn} onPress={() => navigation.navigate("Main", { screen: "Home" })}>
+          <Text style={styles.primaryText}>Back to home</Text>
         </Pressable>
-        <Pressable style={styles.ghostBtn} onPress={() => navigation.replace("PaymentHistory")}>
-          <Text style={[styles.ghostText, { color: colors.text }]}>View payment history</Text>
+        <Pressable onPress={() => navigation.navigate("PaymentHistory")} hitSlop={8}>
+          <Text style={styles.link}>View payment history</Text>
         </Pressable>
       </View>
     </SafeAreaView>
@@ -62,15 +58,19 @@ export function PaymentSuccessScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  badge: { width: 110, height: 110, borderRadius: 55, alignItems: "center", justifyContent: "center", marginBottom: spacing.xl },
-  title: { fontSize: 26, fontWeight: "900", textAlign: "center" },
-  sub: { fontSize: 15, textAlign: "center", marginTop: spacing.sm, lineHeight: 22 },
-  receipt: { marginTop: spacing.lg, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10 },
-  receiptText: { fontSize: 13, fontWeight: "600" },
-  primaryBtn: { height: 56, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-  primaryText: { fontSize: 16, fontWeight: "800" },
-  ghostBtn: { height: 50, alignItems: "center", justifyContent: "center" },
-  ghostText: { fontSize: 15, fontWeight: "700" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
+  badge: {
+    width: 104, height: 104, borderRadius: 52, backgroundColor: colors.ink,
+    alignItems: "center", justifyContent: "center",
+  },
+  title: { ...type.title, color: colors.ink, marginTop: spacing.xl, textAlign: "center" },
+  sub: { ...type.label, fontWeight: "400", color: colors.textMuted, textAlign: "center", marginTop: spacing.sm, lineHeight: 20 },
+  receipt: { backgroundColor: "#F0F0F0", borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, marginTop: spacing.lg },
+  receiptText: { ...type.caption, fontWeight: "600", color: colors.ink },
+
+  footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.md },
+  primaryBtn: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
+  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  link: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center" },
 });

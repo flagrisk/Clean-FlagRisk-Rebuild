@@ -1,35 +1,47 @@
-﻿// Check-in Inbox. Roster of people who have YOU in their panic circle; tap one
-// to see their filterable check-in trail. Read-only; powered by definer RPCs.
+// ============================================================================
+// Check-ins - FlagRisk v2.1
+// Rebuilt against the 10.0 Check-In flow and the Account check-in sheet.
+//   header 36pt round back | title 20/700 centred
+//   roster rows: 40pt avatar, name 14/500, last check-in 12 muted, count chip
+//   trail view: person header, notify toggle, segmented range, entry cards
+// Read-only, powered by definer RPCs. Snapshot pattern kept: new check-ins
+// raise a banner rather than moving the list under the reader.
+// ============================================================================
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { ChevronLeft, MapPin, Inbox as InboxIcon } from "lucide-react-native";
+import { ArrowLeft, MapPin, Inbox as InboxIcon, RefreshCw } from "lucide-react-native";
 import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
 import { Avatar } from "../components/Avatar";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
 
-type Sender = { sender_id: string; display_name: string | null; avatar_url?: string | null; last_check_in: string | null; total: number };
+type Sender = {
+  sender_id: string; display_name: string | null; avatar_url?: string | null;
+  last_check_in: string | null; total: number;
+};
 type Entry = { id: string; latitude: number; longitude: number; note: string | null; created_at: string };
 type Filter = "all" | "today" | "week";
 
-const AVATAR_COLORS = ["#e0457b", "#3ec46a", "#5b6cf0", "#e0a045", "#9c45e0"];
-function avatarColor(id: string) { let h = 0; for (const c of id) h = (h + c.charCodeAt(0)) % AVATAR_COLORS.length; return AVATAR_COLORS[h]; }
-function initials(name: string | null) { if (!name) return "?"; return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(); }
+const RANGES: { key: Filter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "week", label: "7 days" },
+];
+
 function ago(ts: string | null) {
-  if (!ts) return "no check-ins yet";
+  if (!ts) return "No check-ins yet";
   const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
   if (s < 60) return "just now";
-  const m = Math.floor(s / 60); if (m < 60) return m + "m ago";
-  const h = Math.floor(m / 60); if (h < 24) return h + "h ago";
-  return Math.floor(h / 24) + "d ago";
+  const m = Math.floor(s / 60); if (m < 60) return m + " mins ago";
+  const h = Math.floor(m / 60); if (h < 24) return h + " hrs ago";
+  return Math.floor(h / 24) + " days ago";
 }
 
 export function CheckInInboxScreen() {
   const navigation = useNavigation<any>();
-  const { colors, glass, gradients, glow } = useTheme();
+  const insets = useSafeAreaInsets();
   const [senders, setSenders] = useState<Sender[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<Sender | null>(null);
@@ -37,7 +49,9 @@ export function CheckInInboxScreen() {
   const [notifyPref, setNotifyPref] = useState(false);
   const [placeNames, setPlaceNames] = useState<Record<string, string>>({});
   const [hasNew, setHasNew] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
   const recheckRunning = useRef(false);
+
   async function resolvePlaceNames(list: Entry[]) {
     for (const e of list) {
       try {
@@ -47,44 +61,45 @@ export function CheckInInboxScreen() {
         const parts = [a.street || a.name || a.district, a.city || a.subregion || a.region].filter(Boolean);
         const label = parts.join(", ");
         if (label) setPlaceNames((prev) => ({ ...prev, [e.id]: "Near " + label }));
-      } catch (_e) { /* geocoding unavailable; coords remain */ }
+      } catch (_e) { /* geocoding unavailable, coordinates remain */ }
     }
   }
-  const [filter, setFilter] = useState<Filter>("all");
 
   useFocusEffect(useCallback(() => {
     (async () => {
       const { data } = await supabase.rpc("my_checkin_senders");
-      setSenders(data ?? []); setLoading(false);
+      setSenders(data ?? []);
+      setLoading(false);
     })();
   }, []));
 
+  function sinceFor(f: Filter) {
+    if (f === "today") return new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    if (f === "week") return new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    return null;
+  }
+
   async function openTrail(s: Sender, f: Filter = "all") {
-    setActive(s); setFilter(f);
-    // Load this watcher's check-in push preference for this traveler.
+    setActive(s); setFilter(f); setHasNew(false);
     try {
       const { data: pref } = await supabase.rpc("get_checkin_push_pref", { p_traveler: s.sender_id });
       setNotifyPref(pref === true);
     } catch (_e) { setNotifyPref(false); }
-    let since: string | null = null;
-    if (f === "today") since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-    if (f === "week") since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-    const { data } = await supabase.rpc("checkin_trail", { p_sender: s.sender_id, p_since: since, p_until: null, p_limit: 200 });
+    const { data } = await supabase.rpc("checkin_trail", {
+      p_sender: s.sender_id, p_since: sinceFor(f), p_until: null, p_limit: 200,
+    });
     const list = data ?? [];
     setEntries(list);
     resolvePlaceNames(list);
   }
 
-  // Quietly recheck the open trail for new check-ins. Does NOT mutate the list;
-  // only raises a banner so the reader is not interrupted (snapshot pattern).
   async function recheckTrail() {
     if (!active || recheckRunning.current) return;
     recheckRunning.current = true;
     try {
-      let since = null;
-      if (filter === "today") since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-      if (filter === "week") since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const { data } = await supabase.rpc("checkin_trail", { p_sender: active.sender_id, p_since: since, p_until: null, p_limit: 1 });
+      const { data } = await supabase.rpc("checkin_trail", {
+        p_sender: active.sender_id, p_since: sinceFor(filter), p_until: null, p_limit: 1,
+      });
       const newest = data && data[0];
       if (newest) {
         setEntries((cur) => {
@@ -107,65 +122,89 @@ export function CheckInInboxScreen() {
 
   async function toggleNotify(next: boolean) {
     if (!active) return;
-    setNotifyPref(next); // optimistic
+    setNotifyPref(next);
     try {
       await supabase.rpc("set_checkin_push_pref", { p_traveler: active.sender_id, p_notify: next });
-    } catch (_e) {
-      setNotifyPref(!next); // revert on failure
-    }
+    } catch (_e) { setNotifyPref(!next); }
   }
 
-  // ---- Trail view ----
+  const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} style={styles.headBtnPlain} hitSlop={8}>
+        <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
+      </Pressable>
+      <Text style={styles.headTitle}>{title}</Text>
+      <View style={{ width: 36 }} />
+    </View>
+  );
+
   if (active) {
-    const ac = avatarColor(active.sender_id);
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-        <View style={styles.topbar}>
-          <Pressable onPress={() => { setActive(null); setEntries([]); }} hitSlop={12} style={{ flexDirection: "row", alignItems: "center" }}>
-            <ChevronLeft size={22} color={colors.text} strokeWidth={2} /><Text style={[styles.back, { color: colors.text }]}>Inbox</Text>
-          </Pressable>
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <Header title="Check-in trail" onBack={() => { setActive(null); setEntries([]); }} />
+
+        <View style={styles.person}>
+          <Avatar uri={active.avatar_url} name={active.display_name} id={active.sender_id} size={56} />
+          <Text style={styles.personName}>{active.display_name ?? "FlagRisk user"}</Text>
+          <Text style={styles.personSub}>{active.total} check-ins shared with you</Text>
         </View>
-        <View style={styles.trailHead}>
-          <Avatar uri={active.avatar_url} name={active.display_name} id={active.sender_id} size={48} />
-          <Text style={[styles.trailName, { color: colors.text }]}>{active.display_name ?? "FlagRisk user"}</Text>
-          <View style={[styles.notifyRow, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-            <Text style={[styles.notifyLabel, { color: colors.text }]}>Notify me when they check in</Text>
-            <Switch
-              value={notifyPref}
-              onValueChange={toggleNotify}
-              trackColor={{ false: glass.stroke, true: colors.accentOn }}
-              thumbColor={"#ffffff"}
-            />
-          </View>
+
+        <View style={styles.notifyCard}>
+          <Text style={styles.notifyLabel}>Notify me when they check in</Text>
+          <Switch
+            value={notifyPref}
+            onValueChange={toggleNotify}
+            trackColor={{ false: "#CDCDCD", true: colors.ink }}
+            thumbColor="#FFFFFF"
+          />
         </View>
-        <View style={styles.filterRow}>
-          {(["all", "today", "week"] as Filter[]).map((f) => (
-            <Pressable key={f} onPress={() => openTrail(active, f)}
-              style={[styles.chip, { borderColor: filter === f ? colors.accentOn : glass.stroke, backgroundColor: filter === f ? colors.accent : glass.surface }]}>
-              <Text style={[styles.chipText, { color: filter === f ? colors.accentText : colors.textMuted }]}>{f === "all" ? "All" : f === "today" ? "Today" : "7 days"}</Text>
-            </Pressable>
-          ))}
+
+        <View style={styles.segment}>
+          {RANGES.map((r) => {
+            const on = filter === r.key;
+            return (
+              <Pressable
+                key={r.key}
+                onPress={() => openTrail(active, r.key)}
+                style={[styles.segmentBtn, on && styles.segmentBtnOn]}
+              >
+                <Text style={[styles.segmentText, on && styles.segmentTextOn]}>{r.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+
         {hasNew ? (
-          <Pressable onPress={() => { setHasNew(false); openTrail(active, filter); }} style={[styles.refreshBanner, { backgroundColor: colors.accentOn }]}>
-            <Text style={[styles.refreshText, { color: "#ffffff" }]}>New check-ins available. Tap to refresh.</Text>
+          <Pressable onPress={() => openTrail(active, filter)} style={styles.banner}>
+            <RefreshCw size={15} color={colors.ink} strokeWidth={2.4} />
+            <Text style={styles.bannerText}>New check-ins available. Tap to refresh.</Text>
           </Pressable>
         ) : null}
+
         <FlatList
           data={entries}
           keyExtractor={(e) => e.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140, gap: spacing.md }}
-          ListEmptyComponent={<Text style={[styles.empty, { color: colors.textMuted }]}>No check-ins in this range.</Text>}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.gutter, paddingTop: spacing.md, paddingBottom: insets.bottom + screenBottomPad }}
+          ListEmptyComponent={<Text style={styles.emptyLine}>No check-ins in this range.</Text>}
           renderItem={({ item }) => (
-            <View style={[styles.entry, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+            <View style={styles.entry}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.entryTime, { color: colors.text }]}>{new Date(item.created_at).toLocaleString()}</Text>
-                {placeNames[item.id] ? <Text style={[styles.entryPlace, { color: colors.text }]}>{placeNames[item.id]}</Text> : null}
-                <Text style={[styles.entryCoord, { color: colors.textMuted }]}>{item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
-                {item.note ? <Text style={[styles.entryNote, { color: colors.textMuted }]}>{item.note}</Text> : null}
+                <Text style={styles.entryTime}>{new Date(item.created_at).toLocaleString()}</Text>
+                {placeNames[item.id] ? <Text style={styles.entryPlace}>{placeNames[item.id]}</Text> : null}
+                <Text style={styles.entryCoord}>
+                  {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
+                </Text>
+                {item.note ? <Text style={styles.entryNote}>{item.note}</Text> : null}
               </View>
-              <Pressable hitSlop={8} onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${item.latitude},${item.longitude}`)}>
-                <MapPin size={22} color={colors.accentOn} strokeWidth={2} />
+              <Pressable
+                hitSlop={8}
+                style={styles.mapBtn}
+                onPress={() => Linking.openURL(
+                  "https://www.google.com/maps/search/?api=1&query=" + item.latitude + "," + item.longitude
+                )}
+              >
+                <MapPin size={18} color={colors.ink} strokeWidth={2} />
               </Pressable>
             </View>
           )}
@@ -174,80 +213,100 @@ export function CheckInInboxScreen() {
     );
   }
 
-  // ---- Roster view ----
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-      <View style={styles.topbar}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={{ flexDirection: "row", alignItems: "center" }}>
-          <ChevronLeft size={22} color={colors.text} strokeWidth={2} /><Text style={[styles.back, { color: colors.text }]}>Profile</Text>
-        </Pressable>
-      </View>
-      <Text style={[styles.header, { color: colors.text }]}>Check-ins</Text>
-      <Text style={[styles.sub, { color: colors.textMuted }]}>People who share their trips with you.</Text>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <Header title="Check-ins" onBack={() => navigation.goBack()} />
+      <Text style={styles.intro}>People who share their trips with you.</Text>
 
-      {!loading && senders.length === 0 ? (
-        <View style={styles.emptyWrap}>
-          <LinearGradientFallback colors={gradients.brand} glow={glow.brand}>
-            <InboxIcon size={30} color={colors.accentText} strokeWidth={2} />
-          </LinearGradientFallback>
-          <Text style={[styles.emptyBig, { color: colors.text }]}>No one yet</Text>
-          <Text style={[styles.empty, { color: colors.textMuted }]}>When someone adds you to their panic circle, their check-ins appear here.</Text>
+      {loading ? (
+        <ActivityIndicator color={colors.ink} style={{ marginTop: 40 }} />
+      ) : senders.length === 0 ? (
+        <View style={styles.empty}>
+          <InboxIcon size={34} color={colors.textFaint} strokeWidth={1.8} />
+          <Text style={styles.emptyTitle}>No one yet</Text>
+          <Text style={styles.emptySub}>
+            When someone adds you to their panic circle, their check-ins appear here.
+          </Text>
         </View>
       ) : (
         <FlatList
           data={senders}
           keyExtractor={(s) => s.sender_id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140, gap: spacing.md }}
-          renderItem={({ item }) => {
-            const ac = avatarColor(item.sender_id);
-            return (
-              <Pressable onPress={() => openTrail(item)} style={[styles.row, { backgroundColor: glass.surface, borderColor: glass.stroke, boxShadow: glow.soft } as any]}>
-                <Avatar uri={item.avatar_url} name={item.display_name} id={item.sender_id} size={48} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.name, { color: colors.text }]}>{item.display_name ?? "FlagRisk user"}</Text>
-                  <Text style={[styles.meta, { color: colors.textMuted }]}>{item.total} check-in{item.total === 1 ? "" : "s"} · {ago(item.last_check_in)}</Text>
-                </View>
-                <ChevronLeft size={20} color={colors.textMuted} strokeWidth={2} style={{ transform: [{ rotate: "180deg" }] }} />
-              </Pressable>
-            );
-          }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: insets.bottom + screenBottomPad }}
+          renderItem={({ item }) => (
+            <Pressable onPress={() => openTrail(item)} style={styles.row}>
+              <Avatar uri={item.avatar_url} name={item.display_name} id={item.sender_id} size={40} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowName} numberOfLines={1}>{item.display_name ?? "FlagRisk user"}</Text>
+                <Text style={styles.rowSub}>{ago(item.last_check_in)}</Text>
+              </View>
+              <View style={styles.countChip}>
+                <Text style={styles.countText}>{item.total}</Text>
+              </View>
+            </Pressable>
+          )}
         />
       )}
     </SafeAreaView>
   );
 }
 
-function LinearGradientFallback({ children }: any) {
-  return <View style={styles.emptyChip}>{children}</View>;
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  topbar: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
-  back: { fontSize: 16, fontWeight: "700", marginLeft: 2 },
-  header: { fontSize: 24, fontWeight: "800", paddingHorizontal: spacing.lg, marginTop: spacing.sm },
-  sub: { fontSize: 14, paddingHorizontal: spacing.lg, marginTop: 2, marginBottom: spacing.sm },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderWidth: 1, borderRadius: radius.lg, padding: spacing.md },
-  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
-  avatarText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-  name: { fontSize: 17, fontWeight: "700" },
-  meta: { fontSize: 13, marginTop: 3 },
-  trailHead: { alignItems: "center", gap: 10, paddingVertical: spacing.md },
-  trailName: { fontSize: 20, fontWeight: "800" },
-  notifyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, marginTop: spacing.sm, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderRadius: radius.md, alignSelf: "stretch", marginHorizontal: spacing.lg },
-  notifyLabel: { fontSize: 14, fontWeight: "600", flex: 1 },
-  filterRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  chip: { paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
-  chipText: { fontSize: 13, fontWeight: "700" },
-  entry: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderWidth: 1, borderRadius: radius.md, padding: spacing.md },
-  entryTime: { fontSize: 15, fontWeight: "700" },
-  entryPlace: { fontSize: 14, fontWeight: "700", marginTop: 3 },
-  entryCoord: { fontSize: 13, marginTop: 3 },
-  entryNote: { fontSize: 13, marginTop: 4, fontStyle: "italic" },
-  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  emptyChip: { width: 70, height: 70, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: "#5b6cf0", marginBottom: spacing.md },
-  emptyBig: { fontSize: 17, fontWeight: "800" },
-refreshBanner: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md, alignItems: "center" },
-  refreshText: { fontSize: 13, fontWeight: "700" },
-  empty: { fontSize: 14, marginTop: 4, textAlign: "center" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+  intro: { ...type.caption, color: colors.textMuted, marginHorizontal: spacing.gutter, marginTop: spacing.sm },
+
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border },
+  rowName: { ...type.label, color: "#000000" },
+  rowSub: { ...type.caption, color: "#8B8B8B", marginTop: 3 },
+  countChip: { minWidth: 28, height: 24, borderRadius: radius.pill, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  countText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
+
+  person: { alignItems: "center", marginTop: spacing.lg },
+  personName: { ...type.subheading, color: colors.ink, marginTop: spacing.sm },
+  personSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+
+  notifyCard: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    backgroundColor: "#FAFAFA", borderRadius: radius.md,
+    marginHorizontal: spacing.gutter, marginTop: spacing.lg,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.ms,
+  },
+  notifyLabel: { ...type.label, fontWeight: "500", color: colors.ink, flex: 1 },
+
+  segment: {
+    flexDirection: "row", backgroundColor: "#F0F0F0", borderRadius: radius.sm,
+    marginHorizontal: spacing.gutter, marginTop: spacing.md, padding: 4, gap: 4,
+  },
+  segmentBtn: { flex: 1, height: 36, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  segmentBtnOn: { backgroundColor: "#333333" },
+  segmentText: { fontSize: 13, lineHeight: 17, fontWeight: "500", color: "#91958E" },
+  segmentTextOn: { color: "#FFFFFF", fontWeight: "600" },
+
+  banner: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    backgroundColor: "#F0F0F0", borderRadius: radius.md,
+    marginHorizontal: spacing.gutter, marginTop: spacing.md, paddingVertical: 12,
+  },
+  bannerText: { ...type.caption, fontWeight: "600", color: colors.ink },
+
+  entry: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    backgroundColor: colors.bg, borderRadius: radius.md, padding: spacing.md,
+    marginBottom: spacing.sm, ...elevation.hairline,
+  },
+  entryTime: { ...type.label, fontWeight: "600", color: colors.ink },
+  entryPlace: { ...type.caption, color: colors.ink, marginTop: 3 },
+  entryCoord: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+  entryNote: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+  mapBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
+  emptyTitle: { ...type.subheading, color: colors.ink },
+  emptySub: { ...type.caption, color: colors.textMuted, textAlign: "center", lineHeight: 18 },
+  emptyLine: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: spacing.xl },
 });

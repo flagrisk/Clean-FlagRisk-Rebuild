@@ -1,69 +1,81 @@
-﻿// SVG risk gauge. Band colours stay semantic normally; on a coloured tile
-// (light mode) it renders white/translucent to read cleanly on the gradient.
+// ============================================================================
+// Risk dial - FlagRisk v2.1
+// Corrected against Figma "2.0 Risk Score Drawup": the dial is a SEMICIRCLE,
+// not the 250 degree ring previously built. Thin radiating ticks, filled to the
+// score in the band colour, unfilled ticks in a track dark enough to read on a
+// tinted card. Numeral centred inside the arc, band word and one line below it.
+// ============================================================================
 import { View, Text, StyleSheet } from "react-native";
-import Svg, { Path, Defs, LinearGradient, Stop } from "react-native-svg";
-import { useTheme } from "../theme/ThemeProvider";
+import Svg, { Line } from "react-native-svg";
+import { colors, type } from "../theme";
 
-function polar(cx: number, cy: number, r: number, a: number) {
-  const rad = ((a - 90) * Math.PI) / 180;
+const TICKS = 34;
+const START = 270;   // degrees, 0 = 12 o'clock, clockwise. 270 = 9 o'clock.
+const SWEEP = 180;   // a clean semicircle, opening downward
+const INNER = 0.80;
+const TRACK = "#B7BDC2";   // darkened: #E0E0E0 vanished against the card tint
+
+function point(cx: number, cy: number, r: number, deg: number) {
+  const rad = ((deg - 90) * Math.PI) / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
-function arc(cx: number, cy: number, r: number, start: number, end: number) {
-  const s = polar(cx, cy, r, end);
-  const e = polar(cx, cy, r, start);
-  const large = end - start <= 180 ? 0 : 1;
-  return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 0 ${e.x} ${e.y}`;
-}
 
-export function RiskGauge({ score, size = 145, onTile = false }: { score: number; size?: number; onTile?: boolean }) {
-  const { colors, mode } = useTheme();
+export function RiskGauge({
+  score, size = 220, showLabel = true, onTile = false,
+}: {
+  score: number; size?: number; showLabel?: boolean; onTile?: boolean;
+}) {
   const clamped = Math.max(0, Math.min(100, score));
-  const color = clamped >= 70 ? colors.riskHigh : clamped >= 40 ? colors.riskMedium : colors.riskLow;
-  const label = clamped >= 70 ? "High Risk" : clamped >= 40 ? "Medium Risk" : "Low Risk";
-  const track = onTile ? "rgba(255,255,255,0.30)" : mode === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)";
-  const progressColor = onTile ? "#ffffff" : color;
-  const numColor = onTile ? "#ffffff" : colors.text;
-  const labelColor = onTile ? "rgba(255,255,255,0.9)" : color;
-  const vb = 160;
-  const cx = 80, cy = 80, r = 56, stroke = 11;
-  const START = 225, SWEEP = 270;
-  const end = START + (clamped / 100) * SWEEP;
+  const band =
+    clamped >= 70 ? colors.riskHigh : clamped >= 40 ? colors.riskMedium : colors.riskLow;
+  const label = clamped >= 70 ? "High" : clamped >= 40 ? "Medium" : "Low";
+
+  const active = onTile ? "#FFFFFF" : band;
+  const track = onTile ? "rgba(255,255,255,0.45)" : TRACK;
+  const numColor = onTile ? "#FFFFFF" : colors.ink;
+
+  const vb = 200;
+  const cx = 100;
+  const cy = 108;      // arc sits high in the box, numeral fills beneath it
+  const outer = 92;
+  const inner = outer * INNER;
+
+  const filled = Math.round((clamped / 100) * TICKS);
+  const ticks = [];
+  for (let i = 0; i < TICKS; i++) {
+    const deg = START + (i / (TICKS - 1)) * SWEEP;
+    const a = point(cx, cy, inner, deg);
+    const b = point(cx, cy, outer, deg);
+    ticks.push(
+      <Line
+        key={i}
+        x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+        stroke={i < filled ? active : track}
+        strokeWidth={3.2}
+        strokeLinecap="round"
+      />
+    );
+  }
+
+  const h = Math.round(size * 0.62);
 
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-      <Svg width={size} height={size} viewBox={`0 0 ${vb} ${vb}`}>
-        <Defs>
-          <LinearGradient id="gauge" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={colors.accentSecondary} />
-            <Stop offset="1" stopColor={colors.accent} />
-          </LinearGradient>
-        </Defs>
-        <Path d={arc(cx, cy, r, START, START + SWEEP)} stroke={track}
-          strokeWidth={stroke} strokeLinecap="round" fill="none" />
-        {clamped > 0 && !onTile && (
-          <Path d={arc(cx, cy, r, START, end)} stroke={color} strokeWidth={stroke + 6}
-            strokeLinecap="round" fill="none" opacity={0.16} />
-        )}
-        {clamped > 0 && (
-          <Path d={arc(cx, cy, r, START, end)} stroke={onTile ? "#ffffff" : "url(#gauge)"} strokeWidth={stroke}
-            strokeLinecap="round" fill="none" />
-        )}
-      </Svg>
-      <View style={styles.center}>
+    <View style={{ width: size, alignItems: "center" }}>
+      <View style={{ width: size, height: h, overflow: "hidden" }}>
+        <Svg width={size} height={size} viewBox={"0 0 " + vb + " " + vb}>{ticks}</Svg>
+      </View>
+      <View style={styles.readout}>
         <Text style={[styles.score, { color: numColor }]}>{Math.round(clamped)}</Text>
-        <Text numberOfLines={1} style={[styles.label, { color: labelColor }]}>{label}</Text>
+        {showLabel ? (
+          <Text style={[styles.band, { color: onTile ? "#FFFFFF" : colors.ink }]}>{label}</Text>
+        ) : null}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { position: "absolute", alignItems: "center" },
-  score: { fontSize: 38, fontWeight: "800", lineHeight: 42 },
-  label: { fontSize: 9, fontWeight: "600", marginTop: 2 },
+  readout: { alignItems: "center", marginTop: -Math.round(0) },
+  score: { ...type.score, marginTop: -58 },
+  band: { ...type.subheading, marginTop: 2 },
 });
-
-
-
-
-

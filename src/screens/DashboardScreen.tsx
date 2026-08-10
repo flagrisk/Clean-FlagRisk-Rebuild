@@ -1,4 +1,11 @@
-﻿// Dashboard (V2 + theming). Last-known risk preloaded at startup (no flash).
+// ============================================================================
+// Dashboard - FlagRisk v2.1
+// Rebuilt against Figma "Flagrisk v2.1" node 129:21117.
+//   canvas #F5F5FA | hero 364 tall, white -> band gradient | tiles 152 sq r16
+//   section heads 16/700 + 28px arrow chip | rows white r16, 8 apart
+// Data logic is unchanged from the previous build. Presentation only, plus a
+// Nearby Risks section fed by incidents_all (same source the map uses).
+// ============================================================================
 import { useCallback, useState } from "react";
 import { LocationConsentCard } from "../components/LocationConsentCard";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -9,36 +16,95 @@ import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
 import { useRiskCache } from "../theme/RiskCache";
 import { RiskGauge } from "../components/RiskGauge";
-import { GlassCard } from "../components/GlassCard";
-import { GlowChip } from "../components/GlowChip";
-import { ShieldAlert, Siren, UsersRound, MapPin, UserPlus, Bell } from "lucide-react-native";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import {
+  Siren, UsersRound, Bell, Navigation, ArrowUpRight, ChevronRight,
+  TriangleAlert, ShieldCheck, Car, UserPlus, MapPin,
+} from "lucide-react-native";
+import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
+
+const CANVAS = "#F5F5FA";
+const TILE_GRAD = ["#FFFFFF", "#DEDEDE"] as const;
+const CHIP_BG = "#EBEBEB";
 
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
   return new Date(iso).toLocaleDateString();
 }
+
+function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const R = 6371000;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
+function distanceLabel(m: number) {
+  if (m < 950) return Math.round(m / 10) * 10 + " m away";
+  return (m / 1000).toFixed(1) + " km away";
+}
+
+function SectionHead({ title, onPress }: { title: string; onPress: () => void }) {
+  return (
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Pressable onPress={onPress} hitSlop={10} style={styles.sectionChip}>
+        <ArrowUpRight size={17} color={colors.ink} strokeWidth={2} />
+      </Pressable>
+    </View>
+  );
+}
+
+function Tile({
+  title, value, caption, Icon, onPress, badge,
+}: {
+  title: string; value: string; caption: string;
+  Icon: any; onPress: () => void; badge?: number;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.tileWrap}>
+      <LinearGradient colors={TILE_GRAD} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.tile}>
+        <View style={styles.tileTop}>
+          <View style={styles.tileGlyph}>
+            <Icon size={18} color={colors.ink} strokeWidth={2} />
+          </View>
+          <ArrowUpRight size={20} color={colors.ink} strokeWidth={2.2} />
+        </View>
+        <View>
+          <Text style={styles.tileTitle}>{title}</Text>
+          <Text style={styles.tileValue}>{value}</Text>
+          <Text style={styles.tileCaption}>{caption}</Text>
+        </View>
+        {badge && badge > 0 ? (
+          <View style={styles.tileBadge}><Text style={styles.tileBadgeText}>{badge}</Text></View>
+        ) : null}
+      </LinearGradient>
+    </Pressable>
+  );
+}
+
 export function DashboardScreen() {
-  const navigation = useNavigation();
-  const { colors, gradients, glow, mode } = useTheme();
-  const light = mode === "light";
+  const navigation = useNavigation<any>();
   const cache = useRiskCache();
   const cp = cache.profile;
-  const [name, setName] = useState(cp?.name ? cp.name : "there");
+  const [name, setName] = useState(cp?.name ? cp.name.trim().split(/\s+/)[0] : "there");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(cp?.avatarUrl ?? null);
-  const [tier, setTier] = useState(cp?.tier ?? "basic");
   const [score, setScore] = useState<number | null>(cache.score);
   const [band, setBand] = useState<string | null>(cache.band);
   const [coords, setCoords] = useState<string | null>(null);
-  const [inbox, setInbox] = useState<{ id: string; kind: string; title: string; is_read: boolean; created_at: string }[]>([]);
+  const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [activity, setActivity] = useState<{ kind: string; title: string; ref_id: string | null; happened_at: string }[]>([]);
+  const [nearby, setNearby] = useState<any[]>([]);
   const [networkCount, setNetworkCount] = useState(0);
   const [pendingRequests, setPendingRequests] = useState(0);
   const [activePanics, setActivePanics] = useState(0);
+  const [unread, setUnread] = useState(0);
   const [fetched, setFetched] = useState(false);
   const [consentVisible, setConsentVisible] = useState(false);
   const loaded = fetched || cache.score != null;
@@ -50,20 +116,20 @@ export function DashboardScreen() {
       if (!uid) return;
       supabase
         .from("notifications")
-        .select("id, kind, title, is_read, created_at")
-        .eq("recipient_id", uid)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .then(({ data: notes }) => { if (notes) setInbox(notes as any); });
+        .select("id", { count: "exact", head: true })
+        .eq("recipient_id", uid).eq("is_read", false)
+        .then(({ count }) => setUnread(count ?? 0));
       supabase
         .rpc("activity_feed", { p_user: uid, p_limit: 3 })
         .then(({ data: acts }) => { if (acts) setActivity(acts as any); });
+      supabase
+        .rpc("incidents_all")
+        .then(({ data }) => { if (data) setNearby(data as any); });
       const { data: prof } = await supabase
         .from("profiles").select("display_name, current_risk_score, current_risk_band, avatar_url, current_tier")
         .eq("id", uid).single();
-      if (prof?.display_name) setName(prof.display_name);
+      if (prof?.display_name) setName(prof.display_name.trim().split(/\s+/)[0]);
       if (prof?.avatar_url) setAvatarUrl(prof.avatar_url);
-      if (prof?.current_tier) setTier(prof.current_tier);
       else if (u.user?.email) setName(u.user.email.split("@")[0]);
       if (prof?.current_risk_score != null) setScore(Number(prof.current_risk_score));
       if (prof?.current_risk_band) setBand(prof.current_risk_band);
@@ -86,7 +152,6 @@ export function DashboardScreen() {
       const { data: panics } = await supabase.rpc("my_incoming_panics");
       setActivePanics((panics ?? []).filter((p: any) => p.status === "active").length);
       try {
-        // Gate the cold OS prompt behind our consent card.
         const already = await Location.getForegroundPermissionsAsync();
         if (!already.granted) {
           let decided = null;
@@ -100,12 +165,11 @@ export function DashboardScreen() {
           ? { status: "granted" }
           : await Location.requestForegroundPermissionsAsync();
         if (status === "granted") {
-          const pos = await Location.getCurrentPositionAsync({});
-          setCoords("SRID=4326;POINT(" + pos.coords.longitude + " " + pos.coords.latitude + ")");
-          await supabase.rpc("refresh_user_risk_score", {
-            p_user_id: uid,
-            p_location: "SRID=4326;POINT(" + pos.coords.longitude + " " + pos.coords.latitude + ")",
-          });
+          const p = await Location.getCurrentPositionAsync({});
+          setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+          const wkt = "SRID=4326;POINT(" + p.coords.longitude + " " + p.coords.latitude + ")";
+          setCoords(wkt);
+          await supabase.rpc("refresh_user_risk_score", { p_user_id: uid, p_location: wkt });
           const { data: refreshed } = await supabase
             .from("profiles").select("current_risk_score, current_risk_band")
             .eq("id", uid).single();
@@ -118,12 +182,9 @@ export function DashboardScreen() {
     })();
   }, []));
 
-  // Foreground live refresh: recompute the location-based risk score every 2
-  // minutes while the dashboard is focused. Stops on blur/unmount so we do not
-  // burn GPS or battery when the screen is not visible.
   useFocusEffect(useCallback(() => {
-    const REFRESH_MS = 120000; // 2 minutes
-    let running = false;       // guard against overlapping ticks
+    const REFRESH_MS = 120000;
+    let running = false;
     const tick = async () => {
       if (running) return;
       running = true;
@@ -133,12 +194,11 @@ export function DashboardScreen() {
         if (!uid) { running = false; return; }
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== "granted") { running = false; return; }
-        const pos = await Location.getCurrentPositionAsync({});
-        setCoords("SRID=4326;POINT(" + pos.coords.longitude + " " + pos.coords.latitude + ")");
-        await supabase.rpc("refresh_user_risk_score", {
-          p_user_id: uid,
-          p_location: "SRID=4326;POINT(" + pos.coords.longitude + " " + pos.coords.latitude + ")",
-        });
+        const p = await Location.getCurrentPositionAsync({});
+        setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+        const wkt = "SRID=4326;POINT(" + p.coords.longitude + " " + p.coords.latitude + ")";
+        setCoords(wkt);
+        await supabase.rpc("refresh_user_risk_score", { p_user_id: uid, p_location: wkt });
         const { data: refreshed } = await supabase
           .from("profiles").select("current_risk_score, current_risk_band")
           .eq("id", uid).single();
@@ -154,161 +214,169 @@ export function DashboardScreen() {
   }, []));
 
   const bandKey = (band ?? "low").toLowerCase();
-  const heroColors = !loaded
-    ? (["#9aa0aa", "#7c828c"] as const)
-    : bandKey === "high" ? gradients.heroHigh : bandKey === "medium" ? gradients.heroMedium : gradients.heroLow;
-  const bandColor = !loaded
-    ? "#9aa0aa"
-    : bandKey === "high" ? colors.riskHigh : bandKey === "medium" ? colors.riskMedium : colors.riskLow;
-  const bandWord = (band ?? "").charAt(0).toUpperCase() + (band ?? "").slice(1);
-  const bgGradient = light ? ["#ffffff", "#eceef3"] as const : ["#15171b", "#0a0b0d"] as const;
-  const scoreTile =
-    bandKey === "high" ? gradients.tileScoreHigh : bandKey === "medium" ? gradients.tileScoreMedium : gradients.tileScoreLow;
+  const heroTint =
+    !loaded ? "#EDEDED"
+      : bandKey === "high" ? "#F0D5D4"
+      : bandKey === "medium" ? "#F4E2CC"
+      : "#D9F2DC";
+  const heroLine =
+    !loaded ? "Reading the risk around you."
+      : bandKey === "high" ? "Your area has elevated community reported risks."
+      : bandKey === "medium" ? "There is some reported activity around you."
+      : "No significant reported activity around you right now.";
 
-  const Tile = ({ grad, children, style, onPress }: any) => {
-    if (light) {
-      const content = (
-        <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.tile, style]}>
-          {children}
-        </LinearGradient>
-      );
-      if (onPress) {
-        return (
-          <Pressable onPress={onPress} style={style} android_ripple={{ color: "rgba(255,255,255,0.18)" }}>
-            {content}
-          </Pressable>
-        );
-      }
-      return content;
-    }
-    return <GlassCard style={style} onPress={onPress}>{children}</GlassCard>;
-  };
-
-  const tileText = light ? "#ffffff" : colors.text;
-  const tileSub = light ? "rgba(255,255,255,0.78)" : colors.textMuted;
-  const tileChipColor = (semantic: string) => (light ? "#ffffff" : semantic);
+  const nearest = pos
+    ? nearby
+      .filter((i) => i.latitude != null && i.longitude != null)
+      .map((i) => ({ ...i, _m: metresBetween(pos.lat, pos.lng, i.latitude, i.longitude) }))
+      .sort((a, b) => a._m - b._m)
+      .slice(0, 2)
+    : [];
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
-      <LinearGradient colors={bgGradient} style={StyleSheet.absoluteFill} />
+    <View style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
           <View style={styles.header}>
-            <Pressable onPress={() => navigation.navigate("Profile" as never)}><LinearGradient colors={gradients.brand} style={styles.avatarRing}>
-              <View style={[styles.avatarInner, { backgroundColor: colors.bgElevated, overflow: "hidden" }]}>{avatarUrl ? <Image source={{ uri: avatarUrl }} style={{ width: "100%", height: "100%" }} /> : null}</View>
-            </LinearGradient></Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.hello, { color: colors.text }]}>Hello, {name}</Text>
-              <Text style={[styles.plan, { color: colors.textMuted }]}>{tier.charAt(0).toUpperCase() + tier.slice(1)} Plan  -  <Text style={{ color: colors.accentOn, fontWeight: "700" }} onPress={() => navigation.navigate("PlanPricing" as never)}>{tier === "premium" ? "Add Coverage" : "Upgrade"}</Text></Text>
+              <Text style={styles.hello} numberOfLines={1}>Hi, {name}</Text>
             </View>
-            <Text style={[styles.signOut, { color: colors.textMuted }]} onPress={() => supabase.auth.signOut({ scope: "local" })}>Sign out</Text>
-          </View>
-
-          <LinearGradient colors={heroColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.hero, { borderColor: light ? "transparent" : colors.border }, light && { boxShadow: "0px 10px 26px rgba(229,72,77,0.30)" } as any]}>
-            <View style={styles.heroTop}>
-              <Text style={[styles.heroTitle, { color: light ? "#ffffff" : colors.text }]}>
-                Risk status: <Text style={{ color: light ? "#ffffff" : bandColor, fontWeight: "800" }}>{loaded ? bandWord : "Checking..."}</Text>
-              </Text>
-              <Text style={[styles.heroScore, { color: light ? "#ffffff" : colors.text }]}>{loaded && score != null ? Math.round(score) : "--"}</Text>
-              <View style={[styles.dot, { backgroundColor: light ? "#ffffff" : bandColor }]} />
-            </View>
-            <Text style={[styles.heroSub, { color: light ? "rgba(255,255,255,0.82)" : colors.textMuted }]}>Safety you share with the people you trust.</Text>
-          </LinearGradient>
-
-          <View style={styles.row}>
-            <Tile grad={scoreTile} style={styles.cardLarge} onPress={() => coords && navigation.navigate("RiskBreakdown" as never, { location: coords, radiusKm: 1 } as never)}>
-              <View style={styles.cardLabel}>
-                <Text style={[styles.cardTitle, { color: tileText }]}>Risk Score</Text>
-                <GlowChip color={tileChipColor(colors.accent)} icon={ShieldAlert} />
-              </View>
-              <View style={{ alignItems: "center", marginTop: spacing.sm }}>
-                <RiskGauge score={score ?? 0} size={145} onTile={light} />
-              </View>
-              <Text style={[styles.tileNote, { color: tileSub }]}>How risky your current location is right now. Tap for details</Text>
-            </Tile>
-
-            <View style={{ flex: 1.3, gap: spacing.md }}>
-              <Tile grad={gradients.tileAlarm} style={{ flex: 1, position: "relative" }} onPress={() => navigation.navigate("PanicInbox" as never)}>
-                <View style={styles.cardLabel}>
-                  <Text style={[styles.cardTitle, { color: tileText }]}>Alarm</Text>
-                  <GlowChip color={tileChipColor(colors.danger)} icon={Siren} />
-                </View>
-                <Text style={[styles.bigStat, { color: light ? "#ffffff" : colors.danger }]}>{activePanics}</Text>
-                <Text style={[styles.stat, { color: tileSub }]}>{activePanics > 0 ? (activePanics === 1 ? "active alarm" : "active alarms") : "View alarms"}</Text>
-                {activePanics > 0 && (
-                  <View style={[styles.reqBadge, { backgroundColor: colors.danger }]}>
-                    <Text style={styles.reqBadgeText}>{activePanics}</Text>
-                  </View>
-                )}
-              </Tile>
-
-              <Tile grad={gradients.tileNetwork} style={{ flex: 1, position: "relative" }} onPress={() => navigation.navigate("Network" as never)}>
-                <View style={styles.cardLabel}>
-                  <Text style={[styles.cardTitle, { color: tileText }]}>Network</Text>
-                  <GlowChip color={tileChipColor(colors.accentSecondary)} icon={UsersRound} />
-                </View>
-                <Text style={[styles.bigStat, { color: light ? "#ffffff" : colors.safe }]}>{networkCount}</Text>
-                <Text style={[styles.stat, { color: tileSub }]}>{networkCount === 1 ? "member" : "members"}</Text>
-                {pendingRequests > 0 && (
-                  <View style={[styles.reqBadge, { backgroundColor: colors.danger }]}>
-                    <Text style={styles.reqBadgeText}>{pendingRequests}</Text>
-                  </View>
-                )}
-              </Tile>
-            </View>
-          </View>
-
-          <GlassCard style={{ marginTop: spacing.md }}>
-            <Pressable onPress={() => navigation.navigate("Inbox" as never)}>
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Inbox</Text>
-              {inbox.length === 0 ? (
-                <Text style={[styles.empty, { color: colors.textMuted }]}>No alerts yet. Flagged risks and network alerts will appear here.</Text>
-              ) : (
-                inbox.map((n) => {
-                  const Icon = n.kind === "panic" ? Siren : n.kind === "network_flag" ? UsersRound : n.kind === "incident_nearby" ? MapPin : n.kind === "network_invite" ? UserPlus : Bell;
-                  const tone = n.kind === "panic" ? colors.danger : colors.accentOn;
-                  return (
-                    <View key={n.id} style={styles.inboxRow}>
-                      <Icon size={18} color={tone} strokeWidth={2} />
-                      <Text style={[styles.inboxTitle, { color: colors.text }]} numberOfLines={1}>{n.title}</Text>
-                      <Text style={[styles.inboxTime, { color: colors.textFaint }]}>{timeAgo(n.created_at)}</Text>
-                      {!n.is_read && <View style={[styles.inboxPip, { backgroundColor: tone }]} />}
-                    </View>
-                  );
-                })
-              )}
+            <Pressable onPress={() => navigation.navigate("Inbox")} style={styles.headBtn} hitSlop={8}>
+              <Bell size={19} color={colors.ink} strokeWidth={2} />
+              {unread > 0 ? <View style={styles.headPip} /> : null}
             </Pressable>
-          </GlassCard>
+            <Pressable onPress={() => navigation.navigate("Report")} style={styles.headBtn} hitSlop={8}>
+              <Navigation size={18} color={colors.ink} strokeWidth={2} />
+            </Pressable>
+          </View>
 
-          <GlassCard style={{ marginTop: spacing.md }}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Activity Tracker</Text>
-            {activity.length === 0 ? (
-              <Text style={[styles.empty, { color: colors.textMuted }]}>Your recent activity will show here.</Text>
-            ) : (
-              activity.map((a, i) => {
-                const Icon = a.kind === "alarm_fired" ? Siren : a.kind === "risk_flagged" ? ShieldAlert : a.kind === "network_added" ? UsersRound : MapPin;
-                const tone = a.kind === "alarm_fired" ? colors.danger : colors.accentOn;
-                const tappable = a.kind === "risk_flagged" && a.ref_id;
-                const Row = (
-                  <View style={styles.inboxRow}>
+          <View style={styles.heroWrap}>
+            <LinearGradient
+              colors={["#FFFFFF", heroTint]}
+              start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}
+              style={styles.hero}
+            >
+              <View style={styles.heroHead}>
+                <Text style={styles.heroLabel}>Your risk level</Text>
+                <Pressable style={styles.livePill} onPress={() => navigation.navigate("Report")}>
+                  <Text style={styles.livePillText}>LIVE MAP</Text>
+                  <ChevronRight size={14} color={colors.ink} strokeWidth={2.4} />
+                </Pressable>
+              </View>
+
+              <Pressable
+                onPress={() => coords && navigation.navigate("RiskBreakdown", { location: coords, radiusKm: 1 })}
+                style={{ alignItems: "center" }}
+              >
+                <RiskGauge score={score ?? 0} size={228} showLabel={loaded} />
+                <Text style={styles.heroLine}>{heroLine}</Text>
+              </Pressable>
+            </LinearGradient>
+          </View>
+
+          <View style={styles.tileRow}>
+            <Tile
+              title="Alarm"
+              Icon={Siren}
+              value={String(activePanics)}
+              caption={activePanics === 1 ? "active alarm" : "active alarms"}
+              badge={activePanics}
+              onPress={() => navigation.navigate("PanicInbox")}
+            />
+            <Tile
+              title="Network"
+              Icon={UsersRound}
+              value={networkCount + " of 7"}
+              caption={pendingRequests > 0 ? "invite waiting" : "in your circle"}
+              badge={pendingRequests}
+              onPress={() => navigation.navigate("Network")}
+            />
+          </View>
+
+          <SectionHead title="Nearby Risks" onPress={() => navigation.navigate("Report")} />
+          {nearest.length === 0 ? (
+            <View style={styles.card}>
+              <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
+                <ShieldCheck size={18} color={colors.safe} strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>Nothing reported nearby</Text>
+                <Text style={styles.rowSub}>Risks flagged around you will appear here.</Text>
+              </View>
+            </View>
+          ) : (
+            nearest.map((i) => (
+              <Pressable
+                key={i.id}
+                onPress={() => navigation.navigate("IncidentDetail", { incidentId: i.id })}
+                style={styles.card}
+              >
+                <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
+                  <TriangleAlert
+                    size={18}
+                    strokeWidth={2}
+                    color={i.severity === "critical" || i.severity === "high" ? colors.riskHigh
+                      : i.severity === "moderate" ? colors.riskMedium : colors.textMuted}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {String(i.category_id ?? "Incident").replace(/_/g, " ")}
+                  </Text>
+                  <Text style={styles.rowSub}>{distanceLabel(i._m)}</Text>
+                </View>
+              </Pressable>
+            ))
+          )}
+
+          <SectionHead title="Activity Tracker" onPress={() => navigation.navigate("Inbox")} />
+          {activity.length === 0 ? (
+            <View style={styles.card}>
+              <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
+                <MapPin size={18} color={colors.textMuted} strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowTitle}>No activity yet</Text>
+                <Text style={styles.rowSub}>Check-ins, reports and alerts will appear here.</Text>
+              </View>
+            </View>
+          ) : (
+            activity.map((a, i) => {
+              const Icon =
+                a.kind === "alarm_fired" ? Siren
+                  : a.kind === "risk_flagged" ? TriangleAlert
+                  : a.kind === "network_added" ? UserPlus
+                  : Car;
+              const tone = a.kind === "alarm_fired" ? colors.riskHigh : colors.ink;
+              const tappable = a.kind === "risk_flagged" && a.ref_id;
+              const Row = (
+                <>
+                  <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
                     <Icon size={18} color={tone} strokeWidth={2} />
-                    <Text style={[styles.inboxTitle, { color: colors.text }]} numberOfLines={1}>{a.title}</Text>
-                    <Text style={[styles.inboxTime, { color: colors.textFaint }]}>{timeAgo(a.happened_at)}</Text>
                   </View>
-                );
-                return tappable ? (
-                  <Pressable key={i} onPress={() => navigation.navigate("IncidentDetail" as never, { incidentId: a.ref_id } as never)}>{Row}</Pressable>
-                ) : (
-                  <View key={i}>{Row}</View>
-                );
-              })
-            )}
-          </GlassCard>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>{a.title}</Text>
+                    <Text style={styles.rowSub}>{timeAgo(a.happened_at)}</Text>
+                  </View>
+                </>
+              );
+              return tappable ? (
+                <Pressable key={i} style={styles.card} onPress={() => navigation.navigate("IncidentDetail", { incidentId: a.ref_id })}>
+                  {Row}
+                </Pressable>
+              ) : (
+                <View key={i} style={styles.card}>{Row}</View>
+              );
+            })
+          )}
+
         </ScrollView>
         <LocationConsentCard
           visible={consentVisible}
           onDone={() => { setConsentVisible(false); setFetched(false); }}
+          title="Share your location"
+          body="FlagRisk uses your location to score the risk around you and to show nearby reports."
         />
       </SafeAreaView>
     </View>
@@ -316,73 +384,61 @@ export function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  scroll: { padding: spacing.lg, paddingBottom: 130 },
-  header: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.lg },
-  avatarRing: { width: 52, height: 52, borderRadius: 26, padding: 2, alignItems: "center", justifyContent: "center" },
-  avatarInner: { flex: 1, alignSelf: "stretch", borderRadius: 24 },
-  hello: { fontSize: 22, fontWeight: "800" },
-  plan: { fontSize: 13, marginTop: 2 },
-  signOut: { fontSize: 13 },
-  hero: { borderRadius: radius.xl, padding: spacing.lg, marginBottom: spacing.lg, borderWidth: 1 },
-  heroTop: { flexDirection: "row", alignItems: "center", gap: 8 },
-  heroTitle: { fontSize: 17, fontWeight: "700" },
-  heroScore: { fontSize: 26, fontWeight: "800", marginLeft: "auto" },
-  dot: { width: 11, height: 11, borderRadius: 6 },
-  heroSub: { fontSize: 13, marginTop: 8 },
-  row: { flexDirection: "row", gap: spacing.md },
-  cardLarge: { flex: 1.2 },
-  tile: { borderRadius: radius.xl, padding: 16, overflow: "hidden", boxShadow: "0px 0px 2px 2px rgba(20,25,40,0.32), 0px 8px 22px rgba(40,50,80,0.18)" } as any,
-  cardLabel: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardTitle: { fontSize: 16, fontWeight: "700", flex: 1, marginRight: spacing.sm },
-  tileNote: { fontSize: 11, lineHeight: 15, textAlign: "center", marginTop: -8, fontWeight: "600" },
-  inboxRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: spacing.sm },
-  inboxTitle: { fontSize: 12, fontWeight: "400", flex: 1 },
-  inboxTime: { fontSize: 11 },
-  inboxPip: { width: 7, height: 7, borderRadius: 3.5 },
-  reqBadge: { position: "absolute", top: 10, right: 10, minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
-  reqBadgeText: { color: "#fff", fontSize: 13, fontWeight: "800" },
-  bigStat: { fontSize: 30, fontWeight: "800", marginTop: spacing.sm },
-  stat: { fontSize: 13 },
-  empty: { fontSize: 13, marginTop: spacing.sm, lineHeight: 19 },
+  root: { flex: 1, backgroundColor: CANVAS },
+  scroll: { paddingHorizontal: spacing.gutter, paddingBottom: screenBottomPad },
+
+  header: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingTop: spacing.sm, marginBottom: spacing.md },
+  hello: { ...type.heading, color: colors.inkDeep },
+  headBtn: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: "#FEFEFE",
+    alignItems: "center", justifyContent: "center", ...elevation.hairline,
+  },
+  headPip: { position: "absolute", top: 9, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.riskHigh },
+
+  heroWrap: { borderRadius: radius.xl, overflow: "hidden", marginBottom: spacing.md, ...elevation.card },
+  hero: { paddingTop: spacing.md, paddingBottom: spacing.lg, paddingHorizontal: spacing.md },
+  heroHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  heroLabel: { fontSize: 16, lineHeight: 20, fontWeight: "600", color: colors.ink },
+  livePill: {
+    flexDirection: "row", alignItems: "center", gap: 2,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: "rgba(20,21,42,0.22)",
+    paddingLeft: 12, paddingRight: 6, paddingVertical: 6, backgroundColor: "rgba(255,255,255,0.55)",
+  },
+  livePillText: { fontSize: 12, lineHeight: 16, fontWeight: "700", color: colors.ink, letterSpacing: 0.4 },
+  heroLine: { ...type.caption, color: "#333333", textAlign: "center", marginTop: 4, maxWidth: 250 },
+
+  tileRow: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.xs },
+  tileWrap: {
+    flex: 1, borderRadius: radius.md, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(20,21,42,0.10)", ...elevation.card,
+  },
+  tile: { height: 158, padding: spacing.md, justifyContent: "space-between" },
+  tileTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
+  tileGlyph: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.85)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(20,21,42,0.08)",
+  },
+  tileTitle: { ...type.label, fontWeight: "600", color: colors.ink },
+  tileValue: { ...type.heading, color: colors.ink, marginTop: 2 },
+  tileCaption: { ...type.caption, color: colors.textMuted },
+  tileBadge: {
+    position: "absolute", top: 12, right: 44, minWidth: 22, height: 22, borderRadius: 11,
+    paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.riskHigh,
+  },
+  tileBadgeText: { ...type.micro, color: "#FFFFFF", fontWeight: "700" },
+
+  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 28, marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
+  sectionChip: { width: 28, height: 28, borderRadius: 14, backgroundColor: CHIP_BG, alignItems: "center", justifyContent: "center" },
+
+  card: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    backgroundColor: colors.bg, borderRadius: radius.md,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm, ...elevation.hairline,
+  },
+  rowIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  rowTitle: { ...type.label, color: colors.ink, textTransform: "capitalize" },
+  rowSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

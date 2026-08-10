@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// Video Capture â€” record a short clip as evidence for a report and upload it to
+// ============================================================================
+// Video Capture - record a short clip as evidence for a report and upload it to
 // the 'report-evidence' Storage bucket. Returns the storage path to the caller
 // via navigation params (onCaptured). Capped at ~15s to keep uploads small.
 //
@@ -14,8 +14,10 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
+import * as FileSystem from "expo-file-system/legacy";
+import { decode as decodeBase64 } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
-import { colors, radius, spacing } from "../theme";
+import { colors, radius, spacing, type } from "../theme";
 
 const MAX_SECONDS = 10;  // capture cap: change here only
 
@@ -71,9 +73,14 @@ export function VideoCaptureScreen() {
       const token = sess.session?.access_token;
       const path = `${u.user?.id}/${Date.now()}.mp4`;
 
-      // read the local recording into bytes
-      const res = await fetch(uri);
-      const blob = await res.blob();
+      // Read the local recording into real bytes. fetch(uri).blob() does NOT work
+      // on React Native for file:// URIs - it yields a registry-backed Blob that
+      // XHR sends as an empty body, so the object lands in Storage at 0 bytes and
+      // the player shows a blank frame. Base64 -> ArrayBuffer is the path that
+      // works (same as SupportThreadScreen).
+      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = decodeBase64(b64);
+      if (!bytes || bytes.byteLength === 0) throw new Error("The recording was empty. Please record again.");
 
       // upload via XHR so we get real progress events (the JS client doesn't expose them)
       const uploadUrl = `https://aqgkntulbuqqqjxjafmw.supabase.co/storage/v1/object/report-evidence/${path}`;
@@ -93,7 +100,7 @@ export function VideoCaptureScreen() {
           else reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
         };
         xhr.onerror = () => reject(new Error("Network error during upload"));
-        xhr.send(blob);
+        xhr.send(bytes);
       });
 
       setUploading(false);
@@ -111,16 +118,16 @@ export function VideoCaptureScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}><Text style={styles.back}>{"< Cancel"}</Text></Pressable>
-        <Text style={styles.headerTitle}>Record evidence</Text>
-        <View style={{ width: 60 }} />
+        <Pressable onPress={() => navigation.goBack()} hitSlop={12}><Text style={styles.back}>{"Cancel"}</Text></Pressable>
+        <Text style={styles.headerTitle}>Video evidence</Text>
+        <View style={{ width: 54 }} />
       </View>
 
       <View style={styles.cameraWrap}>
         <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode="video" facing="back" />
         {uploading && (
           <View style={styles.overlay}>
-            <Text style={styles.overlayText}>Uploading evidence...</Text>
+            <Text style={styles.overlayText}>Uploading evidence</Text>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
             </View>
@@ -139,31 +146,27 @@ export function VideoCaptureScreen() {
             <View style={styles.stopSquare} />
           </Pressable>
         )}
-        <Text style={styles.hint}>{recording ? `Recording... ${remaining}s left (tap to stop)` : `Tap to record (max ${MAX_SECONDS}s)`}</Text>
+        <Text style={styles.hint}>{recording ? `Recording, ${remaining}s left. Tap to stop.` : `Tap to record, up to ${MAX_SECONDS} seconds`}</Text>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#000" },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  back: { color: colors.accent, fontSize: 16, fontWeight: "700" },
-  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  cameraWrap: { flex: 1, overflow: "hidden", margin: spacing.md, borderRadius: radius.lg },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
-  overlayText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  overlaySub: { color: "#fff", fontSize: 15, fontWeight: "700", marginTop: 10 },
-  progressTrack: { width: 220, height: 10, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.25)", marginTop: 16, overflow: "hidden" },
-  progressFill: { height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  controls: { alignItems: "center", paddingVertical: spacing.xl, gap: spacing.md },
-  recordBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
-  recordDot: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.danger },
-  stopBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: colors.danger, alignItems: "center", justifyContent: "center" },
-  stopSquare: { width: 30, height: 30, borderRadius: 6, backgroundColor: colors.danger },
-  hint: { color: "#fff", fontSize: 14 },
+  safe: { flex: 1, backgroundColor: colors.inkDeep },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.gutter, paddingVertical: spacing.md },
+  back: { ...type.label, fontWeight: "600", color: "#FFFFFF" },
+  headerTitle: { ...type.subheading, color: "#FFFFFF" },
+  cameraWrap: { flex: 1, overflow: "hidden", marginHorizontal: spacing.md, marginBottom: spacing.md, borderRadius: radius.lg, backgroundColor: "#000000" },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,1,20,0.72)", alignItems: "center", justifyContent: "center" },
+  overlayText: { ...type.subheading, color: "#FFFFFF" },
+  overlaySub: { ...type.label, fontWeight: "600", color: "#FFFFFF", marginTop: 10 },
+  progressTrack: { width: 220, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.25)", marginTop: 16, overflow: "hidden" },
+  progressFill: { height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  controls: { alignItems: "center", paddingBottom: spacing.xl, gap: spacing.md },
+  recordBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  recordDot: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.riskHigh },
+  stopBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: colors.riskHigh, alignItems: "center", justifyContent: "center" },
+  stopSquare: { width: 30, height: 30, borderRadius: 6, backgroundColor: colors.riskHigh },
+  hint: { ...type.caption, color: "rgba(255,255,255,0.75)" },
 });
-
-
-
-

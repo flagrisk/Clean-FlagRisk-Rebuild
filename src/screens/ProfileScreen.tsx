@@ -1,26 +1,38 @@
-﻿// Profile (V2 + theming + photo upload). Tap avatar to pick/crop a square photo,
-// upload to the avatars bucket, save URL to profiles.avatar_url. Initials fallback.
+// ============================================================================
+// Account / Profile - FlagRisk v2.1
+// Rebuilt against Figma "Profile" (node 115:1942) and the 11.0 Profile flow.
+//   header 36pt round back | title 20/700 centred | 36pt #F0F0F0 edit button
+//   avatar 100pt | name 20/700 | email 12 muted | plan chip
+//   info card #FAFAFA r16 with 40pt icon circles, label 12 muted / value 14/500
+// Settings keeps the full entry list, so this screen is identity plus the two
+// check-in actions, not the mockup's six-row hub.
+//
+// FIX: the avatar upload used fetch(uri).blob(), which yields an empty body on
+// React Native and wrote 0-byte objects. Now reads base64 -> ArrayBuffer.
+// ============================================================================
 import { useCallback, useState } from "react";
-import { showAlert } from "../components/Feedback";
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system/legacy";
+import { decode as decodeBase64 } from "base64-arraybuffer";
 import * as Location from "expo-location";
-import { MapPin, Inbox } from "lucide-react-native";
+import {
+  ArrowLeft, Pencil, Star, Globe, Phone, Crosshair, MapPin, CalendarDays,
+  CreditCard, Inbox, Settings as SettingsIcon, LogOut, Send, Check,
+} from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { humanize } from "../format";
+import { showAlert } from "../components/Feedback";
 import { useRiskCache } from "../theme/RiskCache";
-import { radius, spacing } from "../theme";
+import { humanize } from "../format";
+import { colors, radius, spacing, type, screenBottomPad } from "../theme";
 
 const SUPABASE_URL = "https://aqgkntulbuqqqjxjafmw.supabase.co";
 
 export function ProfileScreen() {
   const navigation = useNavigation<any>();
-  const { colors, glass, gradients, glow } = useTheme();
   const cache = useRiskCache();
   const cp = cache.profile;
   const [name, setName] = useState(cp?.name ?? "");
@@ -29,8 +41,13 @@ export function ProfileScreen() {
   const [tier, setTier] = useState(cp?.tier ?? "basic");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(cp?.avatarUrl ?? null);
   const [uploading, setUploading] = useState(false);
-  const [lastFlag, setLastFlag] = useState<{ when: string; cat: string; lat: number | null; lng: number | null; place: string | null } | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const [checkInDone, setCheckInDone] = useState(false);
+  const insets = useSafeAreaInsets();
+  const [lastFlag, setLastFlag] = useState<
+    { when: string; cat: string; lat: number | null; lng: number | null; place: string | null } | null
+  >(null);
 
   useFocusEffect(useCallback(() => {
     (async () => {
@@ -58,13 +75,10 @@ export function ProfileScreen() {
       if (last) {
         const d = new Date(last.occurred_at);
         setLastFlag({ cat: last.category_id, when: d.toLocaleString(), lat: last.lat ?? null, lng: last.lng ?? null, place: null });
-        // Reverse-geocode the point to a place name (best effort).
         if (last.lat != null && last.lng != null) {
           try {
             const { data: geo } = await supabase.functions.invoke("geocode", { body: { lat: last.lat, lng: last.lng } });
-            if (geo && geo.ok && geo.label) {
-              setLastFlag((cur) => cur ? { ...cur, place: geo.label } : cur);
-            }
+            if (geo && geo.ok && geo.label) setLastFlag((cur) => (cur ? { ...cur, place: geo.label } : cur));
           } catch (_e) {}
         }
       } else setLastFlag(null);
@@ -73,194 +87,328 @@ export function ProfileScreen() {
 
   async function doCheckIn() {
     if (checkingIn) return;
-    // Permission must be confirmed before we promise anything is being sent.
     const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") { return showAlert({ title: "Location needed", message: "Allow location access to share a check-in.", tone: "error" }); }
-    // Instant feedback: confirm on tap, then get the fix and send in the background.
-    showAlert({ title: "Sending your check-in", message: "Your location is being shared with your safety circle." });
+    if (status !== "granted") {
+      setCheckInOpen(false);
+      return showAlert({
+        title: "Location needed",
+        message: "Allow location access to share a check-in.",
+        tone: "error",
+      });
+    }
     setCheckingIn(true);
-    (async () => {
-      try {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        const { error } = await supabase.rpc("send_check_in", { p_lat: pos.coords.latitude, p_lng: pos.coords.longitude, p_note: null });
-        setCheckingIn(false);
-        // Silent on success; recipients receiving the check-in is the confirmation.
-        if (error) { showAlert({ title: "Check-in not sent", message: "We could not send your check-in. Please try again.", tone: "error" }); }
-      } catch (e) {
-        setCheckingIn(false);
-        showAlert({ title: "Check-in not sent", message: "We could not send your check-in. Please try again.", tone: "error" });
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { error } = await supabase.rpc("send_check_in", {
+        p_lat: pos.coords.latitude, p_lng: pos.coords.longitude, p_note: null,
+      });
+      setCheckingIn(false);
+      if (error) {
+        setCheckInOpen(false);
+        return showAlert({
+          title: "Check-in not sent",
+          message: "We could not send your check-in. Please try again.",
+          tone: "error",
+        });
       }
-    })();
+      setCheckInDone(true);
+    } catch (e) {
+      setCheckingIn(false);
+      setCheckInOpen(false);
+      showAlert({
+        title: "Check-in not sent",
+        message: "We could not send your check-in. Please try again.",
+        tone: "error",
+      });
+    }
   }
 
   async function pickAndUpload() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return showAlert({ title: "Permission needed", message: "Allow photo access to set a profile picture.", tone: "error" });
+    if (!perm.granted) {
+      return showAlert({ title: "Permission needed", message: "Allow photo access to set a profile picture.", tone: "error" });
+    }
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 1 });
-    if (res.canceled || !res.assets?.[0]) return;
+    if (res.canceled || !res.assets || !res.assets[0]) return;
     const picked = res.assets[0];
     const side = Math.min(picked.width ?? 0, picked.height ?? 0);
     const originX = Math.floor(((picked.width ?? 0) - side) / 2);
     const originY = Math.floor(((picked.height ?? 0) - side) / 2);
-    const asset = await ImageManipulator.manipulateAsync(picked.uri, [{ crop: { originX, originY, width: side, height: side } }, { resize: { width: 512, height: 512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG });
+    const asset = await ImageManipulator.manipulateAsync(
+      picked.uri,
+      [{ crop: { originX, originY, width: side, height: side } }, { resize: { width: 512, height: 512 } }],
+      { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+    );
     setUploading(true);
     try {
       const { data: u } = await supabase.auth.getUser();
       const { data: sess } = await supabase.auth.getSession();
       const uid = u.user?.id;
-      const token = sess.session?.access_token;
-      const path = `${uid}/avatar.jpg`;
+      const token = sess.session ? sess.session.access_token : null;
+      const path = uid + "/avatar.jpg";
 
-      const r = await fetch(asset.uri);
-      const blob = await r.blob();
+      // Real bytes. fetch(uri).blob() sends an empty body on React Native.
+      const b64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = decodeBase64(b64);
+      if (!bytes || bytes.byteLength === 0) throw new Error("The selected image was empty. Please choose another.");
 
-      const uploadUrl = `${SUPABASE_URL}/storage/v1/object/avatars/${path}`;
+      const uploadUrl = SUPABASE_URL + "/storage/v1/object/avatars/" + path;
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", uploadUrl);
-        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("Authorization", "Bearer " + token);
         xhr.setRequestHeader("Content-Type", "image/jpeg");
         xhr.setRequestHeader("x-upsert", "true");
-        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`${xhr.status}: ${xhr.responseText}`));
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.send(blob);
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error("Upload failed (" + xhr.status + ")"));
+        };
+        xhr.onerror = () => reject(new Error("Network error during upload"));
+        xhr.send(bytes);
       });
 
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/avatars/${path}?t=${Date.now()}`;
+      const publicUrl = SUPABASE_URL + "/storage/v1/object/public/avatars/" + path + "?t=" + Date.now();
       await supabase.from("profiles").update({ avatar_url: publicUrl }).eq("id", uid);
       setAvatarUrl(publicUrl);
       cache.setProfile({ name, email, phone, tier, avatarUrl: publicUrl });
-    } catch (e) {
-      showAlert({ title: "Upload failed", message: String(e), tone: "error" });
+    } catch (e: any) {
+      showAlert({ title: "Upload failed", message: String(e && e.message ? e.message : e), tone: "error" });
     } finally {
       setUploading(false);
     }
   }
 
   const initials = (name || email || "?").split(/[ @]/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const planLabel = tier.charAt(0).toUpperCase() + tier.slice(1) + " Plan";
+  const planWord = tier.charAt(0).toUpperCase() + tier.slice(1);
+  const point = lastFlag && lastFlag.lat != null && lastFlag.lng != null
+    ? lastFlag.lat.toFixed(5) + ", " + lastFlag.lng.toFixed(5)
+    : null;
 
-  const Row = ({ label, value }: { label: string; value: string }) => (
-    <View style={styles.row}>
-      <Text style={[styles.rowLabel, { color: colors.textMuted }]}>{label}</Text>
-      <Text style={[styles.rowValue, { color: colors.text }]} numberOfLines={1}>{value}</Text>
+  const InfoRow = ({
+    Icon, label, value, last,
+  }: { Icon: any; label: string; value: string; last?: boolean }) => (
+    <View style={[styles.infoRow, last && { borderBottomWidth: 0 }]}>
+      <View style={styles.infoIcon}>
+        <Icon size={18} color={colors.ink} strokeWidth={2} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue} numberOfLines={1}>{value}</Text>
+      </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-      <Text style={[styles.header, { color: colors.text }]}>Profile</Text>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.avatarWrap}>
-          <Pressable onPress={pickAndUpload} disabled={uploading}>
-            <LinearGradient colors={gradients.brand} style={styles.avatarRing}>
-              <View style={[styles.avatar, { backgroundColor: colors.bgElevated }]}>
-                {avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={styles.avatarImg} />
-                ) : (
-                  <Text style={[styles.avatarText, { color: colors.accentOn }]}>{initials}</Text>
-                )}
-                {uploading && (
-                  <View style={styles.uploadOverlay}><ActivityIndicator color="#fff" /></View>
-                )}
-              </View>
-            </LinearGradient>
-            <View style={[styles.camBadge, { backgroundColor: colors.accent, borderColor: colors.bg }]}>
-              <Text style={[styles.camGlyph, { color: colors.accentText }]}>+</Text>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.header}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
+        </Pressable>
+        <Text style={styles.headTitle}>Profile</Text>
+        <Pressable onPress={() => navigation.navigate("EditProfile")} style={styles.headBtnFilled} hitSlop={8}>
+          <Pencil size={17} color={colors.ink} strokeWidth={2} />
+        </Pressable>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Pressable onPress={pickAndUpload} disabled={uploading} style={styles.avatarWrap}>
+          <View style={styles.avatar}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatarImg} />
+            ) : (
+              <Text style={styles.avatarText}>{initials}</Text>
+            )}
+            {uploading ? (
+              <View style={styles.uploadOverlay}><ActivityIndicator color="#FFFFFF" /></View>
+            ) : null}
+          </View>
+          <View style={styles.camBadge}>
+            <Pencil size={13} color="#FFFFFF" strokeWidth={2.4} />
+          </View>
+        </Pressable>
+
+        <Text style={styles.name}>{name || "Your name"}</Text>
+        <Text style={styles.email} numberOfLines={1}>{email || "-"}</Text>
+
+        <View style={styles.planChip}>
+          <Star size={12} color="#F2C94C" fill="#F2C94C" strokeWidth={0} />
+          <Text style={styles.planChipText}>{planWord}</Text>
+        </View>
+
+        <View style={styles.infoCard}>
+          <InfoRow Icon={Globe} label="Country" value="Nigeria" />
+          <InfoRow Icon={Phone} label="Phone" value={phone || "Not set"} />
+          <InfoRow Icon={Crosshair} label="Last flag point" value={point || "No reports yet"} />
+          <InfoRow Icon={MapPin} label="Last flag location" value={lastFlag && lastFlag.place ? lastFlag.place : "Not available"} />
+          <InfoRow
+            Icon={CalendarDays}
+            label="Last flagged"
+            value={lastFlag ? humanize(lastFlag.cat) + ", " + lastFlag.when : "No reports yet"}
+            last
+          />
+        </View>
+
+        <View style={styles.infoCard}>
+          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+            <View style={styles.infoIcon}>
+              <CreditCard size={18} color={colors.ink} strokeWidth={2} />
             </View>
-          </Pressable>
-        </View>
-        <Text style={[styles.name, { color: colors.text }]}>{name || "Your name"}</Text>
-        <Text style={[styles.tapHint, { color: colors.textMuted }]}>Tap photo to change</Text>
-
-        <Pressable style={styles.editWrap} onPress={() => navigation.navigate("EditProfile")}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.editBtn, { boxShadow: glow.brand } as any]}>
-            <Text style={[styles.editText, { color: colors.accentText }]}>Edit Profile</Text>
-          </LinearGradient>
-        </Pressable>
-
-        <Pressable style={styles.checkInWrap} onPress={doCheckIn} disabled={checkingIn}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.checkInBtn, { boxShadow: glow.brand } as any, checkingIn && { opacity: 0.7 }]}>
-            <MapPin size={20} color={colors.accentText} strokeWidth={2.4} />
-            <Text style={[styles.checkInText, { color: colors.accentText }]}>{checkingIn ? "Sharing location..." : "Trip Check-in"}</Text>
-          </LinearGradient>
-        </Pressable>
-        <Text style={[styles.checkInHint, { color: colors.textMuted }]}>Quietly share where you are with your panic circle.</Text>
-
-        <Pressable style={[styles.linkBtn, { borderColor: glass.strokeStrong, backgroundColor: glass.surface, marginTop: spacing.md, flexDirection: "row", justifyContent: "center", gap: 8 }]} onPress={() => navigation.navigate("CheckInInbox")}>
-          <Inbox size={18} color={colors.text} strokeWidth={2} />
-          <Text style={[styles.linkText, { color: colors.text }]}>Check-ins shared with you</Text>
-        </Pressable>
-
-        <View style={[styles.card, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-          <Row label="Email" value={email || "-"} />
-          <Row label="Phone" value={phone || "Not set"} />
-          <Row label="Plan" value={planLabel} />
-          <Row label="Last Flagged" value={lastFlag ? humanize(lastFlag.cat) : "No reports yet"} />
-        {lastFlag && lastFlag.lat != null && lastFlag.lng != null && (
-          <Row label="Point" value={lastFlag.lat.toFixed(5) + ", " + lastFlag.lng.toFixed(5)} />
-        )}
-        {lastFlag && lastFlag.place && <Row label="Location" value={lastFlag.place} />}
-          {lastFlag && <Row label="When" value={lastFlag.when} />}
-        </View>
-
-        <View style={[styles.planCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-          <Text style={[styles.planTitle, { color: colors.text }]}>Subscription Plan</Text>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
-            <Text style={[styles.planValue, { color: colors.accentOn }]}>{planLabel}</Text>
-            <Pressable style={[styles.upgradeBtn, { backgroundColor: colors.accent }]} onPress={() => navigation.navigate("PlanPricing")}>
-              <Text style={[styles.upgradeText, { color: colors.accentText }]}>Upgrade</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoLabel}>Subscription</Text>
+              <Text style={styles.infoValue}>{planWord}</Text>
+            </View>
+            <Pressable style={styles.upgradeBtn} onPress={() => navigation.navigate("PlanPricing")}>
+              <Text style={styles.upgradeText}>Upgrade</Text>
             </Pressable>
           </View>
         </View>
 
-        <Pressable style={[styles.linkBtn, { borderColor: glass.strokeStrong, backgroundColor: glass.surface }]} onPress={() => navigation.navigate("Settings")}>
-          <Text style={[styles.linkText, { color: colors.text }]}>Settings</Text>
+        <Pressable style={styles.primaryBtn} onPress={() => { setCheckInDone(false); setCheckInOpen(true); }}>
+          <Send size={18} color={colors.accent} strokeWidth={2.2} />
+          <Text style={styles.primaryBtnText}>Send a check-in</Text>
         </Pressable>
-        <Pressable style={[styles.signOut, { borderColor: colors.danger }]} onPress={() => supabase.auth.signOut({ scope: "local" })}>
-          <Text style={[styles.signOutText, { color: colors.danger }]}>Sign Out</Text>
+        <Text style={styles.hint}>Quietly share where you are with your panic circle.</Text>
+
+        <Pressable style={styles.linkRow} onPress={() => navigation.navigate("CheckInInbox")}>
+          <Inbox size={18} color={colors.ink} strokeWidth={2} />
+          <Text style={styles.linkText}>Check-ins shared with you</Text>
+        </Pressable>
+        <Pressable style={styles.linkRow} onPress={() => navigation.navigate("Settings")}>
+          <SettingsIcon size={18} color={colors.ink} strokeWidth={2} />
+          <Text style={styles.linkText}>Settings</Text>
+        </Pressable>
+        <Pressable style={styles.linkRow} onPress={() => supabase.auth.signOut({ scope: "local" })}>
+          <LogOut size={18} color={colors.riskHigh} strokeWidth={2} />
+          <Text style={[styles.linkText, { color: colors.riskHigh }]}>Sign out</Text>
         </Pressable>
       </ScrollView>
+
+      <Modal
+        visible={checkInOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCheckInOpen(false)}
+      >
+        <Pressable style={styles.backdrop} onPress={() => { if (!checkingIn) setCheckInOpen(false); }}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]} onPress={() => {}}>
+            <View style={styles.grabber} />
+            {checkInDone ? (
+              <>
+                <View style={styles.doneDisc}>
+                  <Check size={30} color={colors.accent} strokeWidth={3} />
+                </View>
+                <Text style={styles.sheetTitle}>Check-in sent</Text>
+                <Text style={styles.sheetBody}>
+                  Your location has been sent to your safety circle.
+                </Text>
+                <Pressable style={styles.sheetBtn} onPress={() => setCheckInOpen(false)}>
+                  <Text style={styles.sheetBtnText}>Done</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.sheetTitle}>Check-in</Text>
+                <Text style={styles.sheetBody}>
+                  You are about to send a check-in to notify your network of your location.
+                </Text>
+                <Pressable
+                  style={[styles.sheetBtn, checkingIn && { opacity: 0.7 }]}
+                  onPress={doCheckIn}
+                  disabled={checkingIn}
+                >
+                  <Text style={styles.sheetBtnText}>
+                    {checkingIn ? "Sending" : "Send check-in"}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { fontSize: 22, fontWeight: "800", textAlign: "center", paddingVertical: spacing.md },
-  scroll: { padding: spacing.lg, alignItems: "center", paddingBottom: 155 },
-  avatarWrap: { marginTop: spacing.sm },
-  avatarRing: { width: 114, height: 114, borderRadius: 57, padding: 2, alignItems: "center", justifyContent: "center" },
-  avatar: { width: "100%", height: "100%", borderRadius: 55, alignItems: "center", justifyContent: "center", overflow: "hidden" },
-  avatarImg: { width: "100%", height: "100%", borderRadius: 55 },
-  avatarText: { fontSize: 36, fontWeight: "800" },
-  uploadOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", borderRadius: 55 },
-  camBadge: { position: "absolute", right: 2, bottom: 2, width: 34, height: 34, borderRadius: 17, borderWidth: 3, alignItems: "center", justifyContent: "center" },
-  camGlyph: { fontSize: 20, fontWeight: "800", lineHeight: 22 },
-  name: { fontSize: 26, fontWeight: "800", marginTop: spacing.md },
-  tapHint: { fontSize: 12, marginTop: 2 },
-  editWrap: { marginTop: spacing.md, borderRadius: radius.md },
-  editBtn: { borderRadius: radius.md, paddingHorizontal: spacing.xl, paddingVertical: 12 },
-  editText: { fontWeight: "800", fontSize: 16 },
-  checkInWrap: { width: "100%", borderRadius: radius.md, marginTop: spacing.xl },
-  checkInBtn: { borderRadius: radius.md, paddingVertical: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10 },
-  checkInText: { fontWeight: "800", fontSize: 17 },
-  checkInHint: { fontSize: 12, marginTop: 6, textAlign: "center" },
-  card: { width: "100%", borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, marginTop: spacing.xl, gap: 14 },
-  row: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md },
-  rowLabel: { fontSize: 15 },
-  rowValue: { fontSize: 15, flexShrink: 1, textAlign: "right" },
-  planCard: { width: "100%", borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, marginTop: spacing.md },
-  planTitle: { fontWeight: "700", fontSize: 16 },
-  planValue: { fontSize: 15, fontWeight: "600" },
-  upgradeBtn: { borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 8 },
-  upgradeText: { fontWeight: "800" },
-  linkBtn: { marginTop: spacing.xl, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.xl, paddingVertical: 12, width: "100%", alignItems: "center" },
-  linkText: { fontWeight: "700" },
-  signOut: { marginTop: spacing.md, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.xl, paddingVertical: 12, width: "100%", alignItems: "center" },
-  signOutText: { fontWeight: "700" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headBtnFilled: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.xl, paddingBottom: screenBottomPad, alignItems: "center" },
+
+  avatarWrap: { width: 100, height: 100 },
+  avatar: {
+    width: 100, height: 100, borderRadius: 50, backgroundColor: "#F0F0F0",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+  },
+  avatarImg: { width: "100%", height: "100%" },
+  avatarText: { ...type.display, color: colors.textMuted },
+  uploadOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
+  camBadge: {
+    position: "absolute", right: 0, bottom: 2, width: 28, height: 28, borderRadius: 14,
+    backgroundColor: colors.ink, borderWidth: 2, borderColor: colors.bg,
+    alignItems: "center", justifyContent: "center",
+  },
+
+  name: { ...type.heading, color: colors.ink, marginTop: spacing.md },
+  email: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+
+  planChip: {
+    flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.sm,
+    borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.bg,
+  },
+  planChipText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
+
+  infoCard: {
+    width: "100%", backgroundColor: "#FAFAFA", borderRadius: radius.md,
+    paddingHorizontal: spacing.md, marginTop: spacing.lg,
+  },
+  infoRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  infoIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  infoLabel: { ...type.caption, color: colors.textMuted },
+  infoValue: { ...type.label, color: colors.ink, marginTop: 2 },
+  upgradeBtn: { backgroundColor: colors.ink, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 8 },
+  upgradeText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.accent },
+
+  primaryBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
+    width: "100%", height: 52, borderRadius: radius.md, backgroundColor: colors.ink, marginTop: spacing.xl,
+  },
+  primaryBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  hint: { ...type.caption, color: colors.textMuted, marginTop: 8, textAlign: "center" },
+
+  linkRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    width: "100%", paddingVertical: spacing.md,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  linkText: { ...type.label, fontWeight: "500", color: colors.ink },
+
+  backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    paddingHorizontal: spacing.gutter, paddingTop: spacing.sm, alignItems: "center",
+  },
+  grabber: { width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.xl },
+  doneDisc: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: colors.ink,
+    alignItems: "center", justifyContent: "center", marginBottom: spacing.md,
+  },
+  sheetTitle: { ...type.title, color: colors.ink, textAlign: "center" },
+  sheetBody: {
+    ...type.body, color: colors.textMuted, textAlign: "center",
+    marginTop: spacing.sm, lineHeight: 23, maxWidth: 300,
+  },
+  sheetBtn: {
+    width: "100%", height: 56, borderRadius: radius.pill, backgroundColor: "#333333",
+    alignItems: "center", justifyContent: "center", marginTop: spacing.xl,
+  },
+  sheetBtnText: { ...type.bodyStrong, fontWeight: "700", color: colors.accent },
 });
-
-

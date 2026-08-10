@@ -1,4 +1,4 @@
-{
+﻿{
   "expo": {
     "name": "FlagRisk",
     "slug": "app",
@@ -11,7 +11,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1B1E3D",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -71,10 +71,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash-jost.png",
+          "image": "./assets/splash-icon.png",
           "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#c6f24e"
+          "backgroundColor": "#1B1E3D"
         }
       ],
       "expo-video"
@@ -88,3 +88,4 @@
     }
   }
 }
+

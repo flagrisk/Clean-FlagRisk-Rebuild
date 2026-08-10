@@ -1,42 +1,73 @@
-﻿// Shared auth pieces (theme-aware). useAuthColors() maps the live theme to the
-// auth palette; AuthTabs is the Email/Phone selector.
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useTheme } from "../theme/ThemeProvider";
+// ============================================================================
+// Shared auth pieces - FlagRisk v2.1
+// No mockup existed for authentication, so this is designed against the system
+// the rest of 2.1 establishes: white surface, 24 gutter, 34/700 title,
+// #FAFAFA fields with an ink focus border, ink primary with a lime label.
+//
+// AuthTabs is retained as an export so nothing breaks, but it now renders
+// nothing: the Phone tab was permanently disabled and marked "soon", which is
+// dead interface. Bring it back when phone auth actually ships.
+// ============================================================================
+import { ReactNode } from "react";
+import {
+  KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { colors, spacing, type } from "../theme";
 
 export function useAuthColors() {
-  const { colors, glass } = useTheme();
   return {
     bg: colors.bg,
-    card: glass.surface,
-    text: colors.text,
+    card: "#FAFAFA",
+    text: colors.ink,
     muted: colors.textMuted,
     accent: colors.accent,
-    accentText: colors.accentText,
-    accentOn: colors.accentOn,
-    border: glass.stroke,
+    accentText: colors.ink,
+    accentOn: colors.ink,
+    border: colors.border,
   };
 }
 
-export function AuthTabs({ active, onEmail }: { active: "email" | "phone"; onEmail: () => void }) {
-  const c = useAuthColors();
+export function AuthTabs(_props: { active?: "email" | "phone"; onEmail?: () => void }) {
+  return null;
+}
+
+export function AuthShell({
+  title, subtitle, children, footer,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  footer: ReactNode;
+}) {
   return (
-    <View style={[styles.tabs, { borderBottomColor: c.border }]}>
-      <Pressable style={styles.tab} onPress={onEmail}>
-        <Text style={[styles.tabText, { color: c.muted }, active === "email" && { color: c.text }]}>Email</Text>
-        {active === "email" && <View style={[styles.underline, { backgroundColor: c.accent }]} />}
-      </Pressable>
-      <View style={styles.tab}>
-        <Text style={[styles.tabText, { color: c.muted, opacity: 0.5 }]}>Phone</Text>
-        <Text style={[styles.soon, { color: c.muted, opacity: 0.5 }]}>soon</Text>
-      </View>
-    </View>
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.mark}>
+            <View style={styles.markDisc} />
+          </View>
+          <Text style={styles.title}>{title}</Text>
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          <View style={styles.fields}>{children}</View>
+        </ScrollView>
+        <View style={styles.footer}>{footer}</View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  tabs: { flexDirection: "row", marginBottom: 28, borderBottomWidth: 1 },
-  tab: { flex: 1, alignItems: "center", paddingBottom: 10 },
-  tabText: { fontSize: 17, fontWeight: "600" },
-  underline: { position: "absolute", bottom: -1, height: 2, width: "70%" },
-  soon: { fontSize: 10, marginTop: 2 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.xl, paddingBottom: spacing.xl },
+  mark: { marginBottom: spacing.xl },
+  markDisc: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.ink },
+  title: { ...type.display, color: colors.ink },
+  subtitle: { ...type.label, fontWeight: "400", color: colors.textMuted, marginTop: 6 },
+  fields: { marginTop: spacing.xl, gap: spacing.md },
+  footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.md },
 });

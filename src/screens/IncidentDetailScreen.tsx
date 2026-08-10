@@ -1,20 +1,38 @@
-﻿// Incident Detail (V2 + theming). Logic + safety content unchanged; theme-aware.
-// AI "Context-aware suggestions" now come from the safety-suggestions Edge
-// Function (Gemini + Google Maps grounding), called with just the incidentId.
-// The advisory is cached per-incident server-side; real nearby places are shown
-// as tappable source chips (Google Maps attribution).
+// ============================================================================
+// Risk Situation Details - FlagRisk v2.1
+// Rebuilt against Figma "Risk Situation Details" (node 75:2431) and its empty
+// state (75:2324).
+//   hero band with floating 36pt back button | title 20/700 with meta line
+//   description | divider | safety advice | confirm actions | Comments
+//
+// TWO DATA GAPS, deliberately left blank rather than invented:
+//  1. The mockup shows "70%" and "Counts at 2% now - fading as it ages".
+//     incident_detail does not return severity_score or confidence_score, so
+//     the weight bar is omitted. Adding those two columns to the RPC turns it on.
+//  2. The mockup hero is a photograph. incident_detail returns no media, so the
+//     hero is a category band. Evidence lives on reports, not incidents.
+//
+// Comments are designed but the backend does not exist yet: the section renders
+// its empty state and there is no composer, so nothing can silently fail.
+// ============================================================================
 import { useCallback, useState } from "react";
-import { showAlert } from "../components/Feedback";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRoute, useNavigation } from "@react-navigation/native";
 import * as Location from "expo-location";
+import {
+  ArrowLeft, ShieldCheck, Siren, Check, X, MessageSquare, Map as MapIcon, Send, Trash2,
+  Flame, Waves, Zap, Users, Car, ShieldAlert, TriangleAlert,
+} from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
+import { showAlert } from "../components/Feedback";
 import { compassDirection, reverseGeocode } from "../../lib/geo";
 import { MiniMap, type RefugePlace } from "../components/MiniMap";
-import { useTheme } from "../theme/ThemeProvider";
-import { ShieldCheck, Sparkles, Siren, ChevronLeft } from "lucide-react-native";
-import { radius, spacing } from "../theme";
+import { Avatar } from "../components/Avatar";
+import { colors, radius, spacing, type } from "../theme";
 
 type Detail = {
   id: string; category_id: string; status: string;
@@ -23,37 +41,36 @@ type Detail = {
   confirms: number; disputes: number;
 };
 type Source = { title: string; uri: string };
+type Comment = {
+  id: string; author_id: string; author_name: string; author_avatar: string | null;
+  body: string; created_at: string; is_mine: boolean;
+};
+
+const CAT_ICON: Record<string, any> = {
+  fire_outbreak: Flame, flood: Waves, storm: Waves, electric_hazard: Zap,
+  protest: Users, traffic_jam: Car, robbery: ShieldAlert, kidnapping: ShieldAlert,
+  terrorism: ShieldAlert, vandalism: ShieldAlert, animal_threat: TriangleAlert,
+  earthquake: TriangleAlert,
+};
 
 const SAFETY_STEPS: Record<string, string[]> = {
   robbery: [
     "Avoid the flagged area and find a safe, populated place.",
-    "Do not confront anyone - your safety comes first.",
+    "Do not confront anyone. Your safety comes first.",
     "Alert your network so they know your situation.",
     "If you are in immediate danger, call local emergency services.",
   ],
-  assault: [
-    "Move away from the area toward people and lighting.",
-    "Get to a safe indoor location if you can.",
-    "Alert your network and share your location.",
-    "If anyone is hurt or in danger, call emergency services now.",
-  ],
   kidnapping: [
     "Do not approach the flagged location.",
-    "Stay in a public, busy place; avoid travelling alone nearby.",
+    "Stay in a public, busy place and avoid travelling alone nearby.",
     "Alert your network immediately and share your location.",
     "Contact local authorities if you have information or feel at risk.",
   ],
-  fire: [
+  fire_outbreak: [
     "Move upwind and away from the fire and smoke.",
     "Do not return for belongings.",
     "Warn others nearby if it is safe to do so.",
     "Call emergency services to report the fire.",
-  ],
-  accident: [
-    "Keep clear of the road/area to avoid secondary incidents.",
-    "Do not move seriously injured people unless they are in danger.",
-    "Call emergency services if there are injuries.",
-    "Alert your network if this affects your route.",
   ],
   flood: [
     "Move to higher ground immediately.",
@@ -62,7 +79,7 @@ const SAFETY_STEPS: Record<string, string[]> = {
     "Alert your network and follow official guidance.",
   ],
   protest: [
-    "Avoid the area; protests can change quickly.",
+    "Avoid the area. Protests can change quickly.",
     "Stay calm and move away from crowds and confrontation.",
     "Keep your phone charged and your network informed.",
     "Follow lawful instructions from authorities.",
@@ -70,27 +87,28 @@ const SAFETY_STEPS: Record<string, string[]> = {
 };
 const DEFAULT_STEPS = [
   "Stay alert and avoid the flagged area if you can.",
-  "Move toward a safe, populated, well-lit place.",
+  "Move toward a safe, populated, well lit place.",
   "Alert your network and share your location.",
   "Contact local emergency services if you are in danger.",
 ];
 function stepsFor(cat: string) { return SAFETY_STEPS[cat] ?? DEFAULT_STEPS; }
 
 function distanceM(aLat: number, aLng: number, bLat: number, bLng: number) {
-  const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371000, toRad = (x: number) => (x * Math.PI) / 180;
   const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
-  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  const s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 function prettyDistance(m: number) {
-  if (m < 1000) return `${Math.round(m / 10) * 10} m away`;
-  return `${(m / 1000).toFixed(1)} km away`;
+  if (m < 1000) return Math.round(m / 10) * 10 + " meters";
+  return (m / 1000).toFixed(1) + " km";
 }
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
+  if (diff < 3600) return Math.floor(diff / 60) + " mins ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + " hrs ago";
   return new Date(iso).toLocaleDateString();
 }
 
@@ -98,7 +116,6 @@ export function IncidentDetailScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const { colors, glass } = useTheme();
   const incidentId: string = route.params?.incidentId;
 
   const [d, setD] = useState<Detail | null>(null);
@@ -109,12 +126,12 @@ export function IncidentDetailScreen() {
   const [aiSteps, setAiSteps] = useState<string[] | null>(null);
   const [aiSources, setAiSources] = useState<Source[]>([]);
   const [aiPlaces, setAiPlaces] = useState<RefugePlace[]>([]);
-  // Advice loading state, so we never show generic steps and THEN swap them for the
-  // AI advice - changing safety instructions after the user has read them is a real
-  // hazard. "loading" until we know; then "ai" or "fallback", never one then the other.
   const [adviceStatus, setAdviceStatus] = useState<"loading" | "ai" | "fallback">("loading");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
 
   const load = useCallback(async () => {
     const { data } = await supabase.rpc("incident_detail", { p_incident: incidentId });
@@ -122,45 +139,76 @@ export function IncidentDetailScreen() {
     setD(detail);
     setLoading(false);
     if (!detail) return;
-    let userLat: number | null = null, userLng: number | null = null;
     try {
       const { status } = await Location.getForegroundPermissionsAsync();
       if (status === "granted") {
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        userLat = pos.coords.latitude; userLng = pos.coords.longitude;
-        const dm = distanceM(userLat, userLng, detail.latitude, detail.longitude);
+        const dm = distanceM(pos.coords.latitude, pos.coords.longitude, detail.latitude, detail.longitude);
         setDist(dm);
-        setDirection(compassDirection(userLat, userLng, detail.latitude, detail.longitude));
+        setDirection(compassDirection(pos.coords.latitude, pos.coords.longitude, detail.latitude, detail.longitude));
         setDistStatus("ready");
-      } else {
-        // Location off: distance genuinely cannot be computed.
-        setDistStatus("unavailable");
-      }
-    } catch { setDistStatus("unavailable"); /* distance optional */ }
+      } else setDistStatus("unavailable");
+    } catch { setDistStatus("unavailable"); }
     const placeName = await reverseGeocode(detail.latitude, detail.longitude);
     setPlace(placeName);
-    // AI advisory: grounded in Google Maps, cached per-incident server-side.
     try {
       const { data: s } = await supabase.auth.getSession();
+      const token = s.session ? s.session.access_token : null;
       const resp = await fetch("https://aqgkntulbuqqqjxjafmw.supabase.co/functions/v1/safety-suggestions", {
         method: "POST",
-        headers: { Authorization: `Bearer ${s.session?.access_token}`, "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
         body: JSON.stringify({ incidentId }),
       });
       const j = await resp.json();
       if (j.ok && Array.isArray(j.suggestions) && j.suggestions.length) {
         setAiSteps(j.suggestions);
         setAiSources(Array.isArray(j.sources) ? j.sources : []);
-        // Real, verified refuges (Google Places, within 1km, never invented).
         setAiPlaces(Array.isArray(j.places) ? j.places : []);
         setAdviceStatus("ai");
-      } else {
-        setAdviceStatus("fallback");
-      }
-    } catch { setAdviceStatus("fallback"); /* enrichment optional */ }
+      } else setAdviceStatus("fallback");
+    } catch { setAdviceStatus("fallback"); }
   }, [incidentId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const loadComments = useCallback(async () => {
+    const { data } = await supabase.rpc("incident_comments_list", { p_incident: incidentId, p_limit: 100 });
+    setComments((data ?? []) as Comment[]);
+  }, [incidentId]);
+
+  useFocusEffect(useCallback(() => { load(); loadComments(); }, [load, loadComments]));
+
+  async function postComment() {
+    const body = draft.trim();
+    if (body === "" || posting) return;
+    setPosting(true);
+    const { error } = await supabase.rpc("post_incident_comment", { p_incident: incidentId, p_body: body });
+    setPosting(false);
+    if (error) {
+      const m = error.message || "";
+      const msg = m.includes("commenting_too_fast") ? "Please wait a moment before commenting again."
+        : m.includes("comment_too_long") ? "That comment is too long. Keep it under 600 characters."
+        : m.includes("empty_comment") ? "Write something first."
+        : "Your comment was not posted. Please try again.";
+      return showAlert({ title: "Not posted", message: msg, tone: "error" });
+    }
+    setDraft("");
+    loadComments();
+  }
+
+  function removeComment(c: Comment) {
+    showAlert({
+      title: "Remove comment",
+      message: "Remove your comment from this incident?",
+      buttons: [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Remove", style: "destructive", onPress: async () => {
+            await supabase.rpc("remove_incident_comment", { p_id: c.id });
+            loadComments();
+          },
+        },
+      ],
+    });
+  }
 
   async function confirm(still: boolean) {
     setBusy(true);
@@ -177,172 +225,276 @@ export function IncidentDetailScreen() {
     if (error) return showAlert({ title: "Could not submit", message: error.message, tone: "error" });
     showAlert({
       title: still ? "Confirmed" : "Marked cleared",
-      message: still ? "Thanks - you confirmed this is still happening." : "Thanks - you reported this as cleared / not accurate."
+      message: still
+        ? "Thank you. You confirmed this is still happening."
+        : "Thank you. You reported this as cleared or not accurate.",
     });
     load();
   }
 
-  const Header = () => (
-    <View style={styles.header}>
-      <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={styles.backRow}>
-        <ChevronLeft size={20} color={colors.accentOn} strokeWidth={2.5} />
-        <Text style={[styles.back, { color: colors.accentOn }]}>Back</Text>
-      </Pressable>
-      <Text style={[styles.headerTitle, { color: colors.text }]}>Risk nearby</Text>
-      <View style={{ width: 50 }} />
-    </View>
-  );
-
-  if (loading) return <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}><ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} /></SafeAreaView>;
-  if (!d) return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}><Header />
-      <Text style={[styles.empty, { color: colors.textMuted }]}>This incident is no longer available.</Text></SafeAreaView>
-  );
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <ActivityIndicator color={colors.ink} style={{ marginTop: 40 }} />
+      </SafeAreaView>
+    );
+  }
+  if (!d) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <View style={styles.floatBackWrap}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.floatBack} hitSlop={8}>
+            <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
+          </Pressable>
+        </View>
+        <Text style={styles.gone}>This incident is no longer available.</Text>
+      </SafeAreaView>
+    );
+  }
 
   const catLabel = d.category_id.replace(/_/g, " ");
+  const Icon = CAT_ICON[d.category_id] ?? TriangleAlert;
   const steps = stepsFor(d.category_id);
+  const metaLine = [
+    dist != null ? prettyDistance(dist) : distStatus === "unavailable" ? null : "Calculating distance",
+    direction,
+    timeAgo(d.created_at),
+  ].filter(Boolean).join("  |  ");
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top", "bottom"]}>
-      <Header />
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + spacing.xl }}>
-        <Text style={[styles.cat, { color: colors.text }]}>{catLabel}</Text>
-
-        <View style={[styles.proximityCard, { backgroundColor: glass.surface, borderLeftColor: colors.danger }]}>
-          <View style={styles.proximityDistRow}>
-            <Text style={[styles.proximityDist, { color: colors.text }]}>
-              {dist != null
-                ? prettyDistance(dist)
-                : distStatus === "unavailable"
-                  ? "Distance unavailable"
-                  : "Calculating distance\u2026"}
-            </Text>
-            {direction ? <View style={[styles.inlineDot, { backgroundColor: colors.textMuted }]} /> : null}
-            {direction ? <Text style={[styles.proximityDist, { color: colors.text }]}>{direction}</Text> : null}
-          </View>
-          {place ? <Text style={[styles.proximityPlace, { color: colors.accentOn }]}>Near {place}</Text> : null}
-          <Text style={[styles.proximityTime, { color: colors.textMuted }]}>Flagged {timeAgo(d.created_at)}</Text>
+    <View style={styles.safe}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }} showsVerticalScrollIndicator={false}>
+        <View style={styles.hero}>
+          <Icon size={56} color={colors.riskHigh} strokeWidth={1.6} />
+          <SafeAreaView style={styles.floatBackWrap} edges={["top"]}>
+            <Pressable onPress={() => navigation.goBack()} style={styles.floatBack} hitSlop={8}>
+              <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
+            </Pressable>
+          </SafeAreaView>
         </View>
 
-        <MiniMap lat={d.latitude} lng={d.longitude} places={aiPlaces} />
-        <Text style={[styles.mapNote, { color: colors.textMuted }]}>
-          {aiPlaces.length > 0
-            ? "Red is the flagged risk. Green are safe places nearby - tap one to open it in Maps."
-            : "Exact flagged location"}
-        </Text>
+        <View style={styles.body}>
+          <Text style={styles.title}>{catLabel}</Text>
+          <Text style={styles.meta}>{metaLine}</Text>
+          <Text style={styles.desc}>
+            {place
+              ? "Reported near " + place + ", " + timeAgo(d.created_at) + "."
+              : "Reported " + timeAgo(d.created_at) + "."}
+          </Text>
 
-        {/* Three states, never a swap. While the advisory is being fetched we show a
-            neutral loading line rather than generic steps that would then be replaced -
-            changing safety advice under the user's eyes is a hazard. Then either the
-            AI advisory (grounded in real nearby places) OR the generic fallback. */}
-        {adviceStatus === "loading" ? (
-          <>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
-            <View style={[styles.stepsCard, { backgroundColor: glass.surface, borderColor: glass.stroke, flexDirection: "row", alignItems: "center", gap: 10 }]}>
-              <ActivityIndicator size="small" color={colors.accentOn} />
-              <Text style={[styles.stepText, { color: colors.textMuted }]}>Finding safe places nearby...</Text>
+          <View style={styles.divider} />
+
+          <MiniMap lat={d.latitude} lng={d.longitude} places={aiPlaces} />
+          <Text style={styles.mapNote}>
+            {aiPlaces.length > 0
+              ? "Red is the flagged risk. Green are safe places nearby. Tap one to open it in Maps."
+              : "Exact flagged location"}
+          </Text>
+
+          <View style={styles.sectionHead}>
+            <ShieldCheck size={18} color={colors.safe} strokeWidth={2} />
+            <Text style={styles.sectionTitle}>Stay safe, do this now</Text>
+          </View>
+
+          {adviceStatus === "loading" ? (
+            <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 10 }]}>
+              <ActivityIndicator size="small" color={colors.ink} />
+              <Text style={styles.stepText}>Finding safe places nearby</Text>
             </View>
-          </>
-        ) : adviceStatus === "fallback" ? (
-          <>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
-            <View style={[styles.stepsCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+          ) : adviceStatus === "fallback" ? (
+            <View style={styles.card}>
               {steps.map((s, i) => (
                 <View key={i} style={styles.stepRow}>
-                  <Text style={[styles.stepNum, { color: colors.accentText, backgroundColor: colors.accent }]}>{i + 1}</Text>
-                  <Text style={[styles.stepText, { color: colors.text }]}>{s}</Text>
+                  <View style={styles.stepNum}><Text style={styles.stepNumText}>{i + 1}</Text></View>
+                  <Text style={styles.stepText}>{s}</Text>
                 </View>
               ))}
             </View>
-          </>
-        ) : (
-          <>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm }}><ShieldCheck size={19} color={colors.safe} strokeWidth={2} /><Text style={[styles.stepsHeading, { color: colors.text, marginTop: 0, marginBottom: 0 }]}>Stay safe - do this now</Text></View>
-            <View style={[styles.aiCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+          ) : (
+            <View style={styles.card}>
               {(aiSteps ?? []).map((s, i) => (
                 <View key={i} style={styles.stepRow}>
-                  <View style={[styles.aiDot, { backgroundColor: colors.accentOn }]} />
-                  <Text style={[styles.stepText, { color: colors.text }]}>{s}</Text>
+                  <View style={styles.stepDot} />
+                  <Text style={styles.stepText}>{s}</Text>
                 </View>
               ))}
-              {aiSources.length > 0 && (
-                <View style={styles.sourcesWrap}>
-                  <Text style={[styles.sourcesLabel, { color: colors.textMuted }]}>Nearby places via Google Maps</Text>
+              {aiSources.length > 0 ? (
+                <View style={{ marginTop: spacing.sm }}>
+                  <Text style={styles.sourcesLabel}>Nearby places via Google Maps</Text>
                   <View style={styles.sourcesRow}>
                     {aiSources.map((src, i) => (
-                      <Pressable key={i} onPress={() => src.uri && Linking.openURL(src.uri)} style={[styles.sourceChip, { borderColor: glass.stroke }]}>
-                        <Text style={[styles.sourceChipText, { color: colors.accentOn }]} numberOfLines={1}>{src.title}</Text>
+                      <Pressable key={i} onPress={() => src.uri && Linking.openURL(src.uri)} style={styles.sourceChip}>
+                        <Text style={styles.sourceChipText} numberOfLines={1}>{src.title}</Text>
                       </Pressable>
                     ))}
                   </View>
                 </View>
-              )}
-              <Text style={[styles.aiNote, { color: colors.textMuted }]}>AI-generated for your situation - use your own judgement; not official advice.</Text>
+              ) : null}
+              <Text style={styles.aiNote}>
+                Generated for your situation. Use your own judgement. This is not official advice.
+              </Text>
             </View>
-          </>
-        )}
+          )}
 
-        <Pressable style={[styles.panicBtn, { backgroundColor: colors.danger }]} onPress={() => navigation.navigate("Panic")}>
-          <Siren size={20} color="#fff" strokeWidth={2} /><Text style={[styles.panicText, { marginLeft: 8 }]}>Activate Panic Alarm</Text>
-        </Pressable>
+          <View style={styles.actionPair}>
+            <Pressable style={styles.actionGhost} onPress={() => navigation.navigate("Panic")}>
+              <Siren size={17} color={colors.riskHigh} strokeWidth={2} />
+              <Text style={[styles.actionGhostText, { color: colors.riskHigh }]}>Panic alarm</Text>
+            </Pressable>
+            <Pressable style={styles.actionSolid} onPress={() => navigation.navigate("Report")}>
+              <MapIcon size={17} color={colors.accent} strokeWidth={2} />
+              <Text style={styles.actionSolidText}>Open on the map</Text>
+            </Pressable>
+          </View>
 
-        <Text style={[styles.prompt, { color: colors.text }]}>Are you near this? Help others by confirming.</Text>
-        <Pressable style={[styles.confirmBtn, { backgroundColor: colors.accent }, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => confirm(true)}>
-          <Text style={[styles.confirmText, { color: colors.accentText }]}>Still happening</Text>
-        </Pressable>
-        <Pressable style={[styles.disputeBtn, { borderColor: colors.danger }, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => confirm(false)}>
-          <Text style={[styles.disputeText, { color: colors.danger }]}>Cleared / not accurate</Text>
-        </Pressable>
-        <View style={styles.tallyRow}>
-          <Text style={[styles.tally, { color: colors.textMuted }]}>{d.confirms} confirmed</Text>
-          <View style={[styles.inlineDotSm, { backgroundColor: colors.textMuted }]} />
-          <Text style={[styles.tally, { color: colors.textMuted }]}>{d.disputes} disputed</Text>
+          <View style={styles.divider} />
+
+          <Text style={styles.prompt}>Are you near this? Help others by confirming.</Text>
+          <View style={styles.confirmRow}>
+            <Pressable style={[styles.confirmBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => confirm(true)}>
+              <Check size={17} color={colors.safe} strokeWidth={2.4} />
+              <Text style={[styles.confirmText, { color: colors.safe }]}>Still happening</Text>
+            </Pressable>
+            <Pressable style={[styles.confirmBtn, busy && { opacity: 0.6 }]} disabled={busy} onPress={() => confirm(false)}>
+              <X size={17} color={colors.riskHigh} strokeWidth={2.4} />
+              <Text style={[styles.confirmText, { color: colors.riskHigh }]}>Cleared</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.tally}>{d.confirms} confirmed  |  {d.disputes} disputed</Text>
+
+          <View style={styles.divider} />
+
+          <Text style={styles.commentsHead}>
+            Comments{comments.length > 0 ? " (" + comments.length + ")" : ""}
+          </Text>
+
+          {comments.length === 0 ? (
+            <View style={styles.commentsEmpty}>
+              <MessageSquare size={22} color={colors.textFaint} strokeWidth={1.8} />
+              <Text style={styles.commentsEmptyTitle}>No comments yet</Text>
+              <Text style={styles.commentsEmptySub}>Be the first to post a comment.</Text>
+            </View>
+          ) : (
+            comments.map((c) => (
+              <View key={c.id} style={styles.cRow}>
+                <Avatar uri={c.author_avatar} name={c.author_name} id={c.author_id} size={36} />
+                <View style={{ flex: 1 }}>
+                  <View style={styles.cTop}>
+                    <Text style={styles.cName} numberOfLines={1}>{c.author_name}</Text>
+                    <Text style={styles.cTime}>{timeAgo(c.created_at)}</Text>
+                    {c.is_mine ? (
+                      <Pressable onPress={() => removeComment(c)} hitSlop={10}>
+                        <Trash2 size={15} color={colors.textMuted} strokeWidth={2} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <Text style={styles.cBody}>{c.body}</Text>
+                </View>
+              </View>
+            ))
+          )}
+
+          <View style={styles.composer}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Add what you are seeing"
+              placeholderTextColor="#9F9F9F"
+              multiline
+              maxLength={600}
+              style={styles.cInput}
+            />
+            <Pressable
+              onPress={postComment}
+              disabled={posting || draft.trim() === ""}
+              style={[styles.cSend, draft.trim() === "" && { opacity: 0.4 }]}
+            >
+              <Send size={18} color={colors.accent} strokeWidth={2.5} />
+            </Pressable>
+          </View>
+          <Text style={styles.cRule}>
+            Say what you can see. Do not name people, and do not post anything you have not
+            witnessed yourself.
+          </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  backRow: { flexDirection: "row", alignItems: "center" },
-  back: { fontSize: 16, fontWeight: "700" },
-  headerTitle: { fontSize: 18, fontWeight: "800" },
-  empty: { textAlign: "center", marginTop: 40 },
-  cat: { fontSize: 28, fontWeight: "800", textTransform: "capitalize" },
-  proximityCard: { borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, borderLeftWidth: 4 },
-  proximityDistRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  proximityDist: { fontSize: 24, fontWeight: "800" },
-  inlineDot: { width: 5, height: 5, borderRadius: 2.5, marginHorizontal: 8 },
-  proximityPlace: { fontSize: 15, fontWeight: "600", marginTop: 4 },
-  proximityTime: { fontSize: 14, marginTop: 4 },
-  mapNote: { fontSize: 12, textAlign: "center", marginTop: 6 },
-  aiHeading: { fontSize: 17, fontWeight: "800", marginTop: spacing.xl, marginBottom: spacing.sm },
-  aiCard: { borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md, borderWidth: 1 },
-  aiDot: { width: 6, height: 6, borderRadius: 3, marginTop: 7 },
-  aiNote: { fontSize: 11, fontStyle: "italic", marginTop: spacing.sm },
-  sourcesWrap: { marginTop: 8 },
-  sourcesLabel: { fontSize: 11, fontWeight: "700", letterSpacing: 0.3, marginBottom: 6 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  hero: { height: 240, backgroundColor: "#FBD1CF", alignItems: "center", justifyContent: "center" },
+  floatBackWrap: { position: "absolute", top: 0, left: spacing.gutter },
+  floatBack: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF",
+    alignItems: "center", justifyContent: "center", marginTop: spacing.md,
+  },
+  gone: { ...type.body, color: colors.textMuted, textAlign: "center", marginTop: 80 },
+
+  body: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg },
+  title: { ...type.heading, color: colors.ink, textTransform: "capitalize" },
+  meta: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+  desc: { ...type.label, fontWeight: "400", color: colors.ink, marginTop: spacing.ms, lineHeight: 20 },
+
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.lg },
+
+  mapNote: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: 6 },
+
+  sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm },
+  sectionTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
+
+  card: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, gap: spacing.ms },
+  stepRow: { flexDirection: "row", gap: spacing.ms, alignItems: "flex-start" },
+  stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
+  stepNumText: { fontSize: 11, lineHeight: 14, fontWeight: "700", color: colors.accent },
+  stepDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.ink, marginTop: 7 },
+  stepText: { ...type.label, fontWeight: "400", color: colors.ink, flex: 1, lineHeight: 20 },
+  sourcesLabel: { ...type.caption, fontWeight: "600", color: colors.textMuted, marginBottom: 6 },
   sourcesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  sourceChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, maxWidth: "100%" },
-  sourceChipText: { fontSize: 12, fontWeight: "700" },
-  stepsHeading: { fontSize: 17, fontWeight: "800", marginTop: spacing.xl, marginBottom: spacing.sm },
-  stepsCard: { borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md, borderWidth: 1 },
-  stepRow: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
-  stepNum: { width: 24, height: 24, borderRadius: 12, textAlign: "center", lineHeight: 24, fontWeight: "800", fontSize: 13, overflow: "hidden" },
-  stepText: { fontSize: 15, flex: 1, lineHeight: 21 },
-  panicBtn: { borderRadius: radius.md, height: 56, flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: spacing.xl },
-  panicText: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  prompt: { fontSize: 15, fontWeight: "600", marginTop: spacing.xl, marginBottom: spacing.md, textAlign: "center" },
-  confirmBtn: { height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-  confirmText: { fontSize: 16, fontWeight: "800" },
-  disputeBtn: { height: 52, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  disputeText: { fontSize: 16, fontWeight: "700" },
-  tallyRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  inlineDotSm: { width: 3, height: 3, borderRadius: 1.5, marginHorizontal: 6 },
-  tally: { fontSize: 13 },
+  sourceChip: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: colors.bg },
+  sourceChipText: { fontSize: 12, lineHeight: 16, fontWeight: "500", color: colors.ink },
+  aiNote: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+
+  actionPair: { flexDirection: "row", gap: spacing.md, marginTop: spacing.xl },
+  actionGhost: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    height: 52, borderRadius: radius.md, borderWidth: 1, borderColor: colors.riskHigh,
+  },
+  actionGhostText: { ...type.label, fontWeight: "600" },
+  actionSolid: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    height: 52, borderRadius: radius.md, backgroundColor: colors.ink,
+  },
+  actionSolidText: { ...type.label, fontWeight: "600", color: colors.accent },
+
+  prompt: { ...type.label, fontWeight: "500", color: colors.ink, textAlign: "center", marginBottom: spacing.md },
+  confirmRow: { flexDirection: "row", gap: spacing.md },
+  confirmBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+  },
+  confirmText: { ...type.label, fontWeight: "600" },
+  tally: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: spacing.ms },
+
+  commentsHead: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
+  commentsEmpty: { alignItems: "center", paddingVertical: spacing.xl, gap: 6 },
+  commentsEmptyTitle: { ...type.label, fontWeight: "600", color: colors.ink },
+  commentsEmptySub: { ...type.caption, color: colors.textMuted, textAlign: "center" },
+
+  cRow: { flexDirection: "row", gap: spacing.ms, paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border },
+  cTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  cName: { ...type.label, fontWeight: "600", color: colors.ink, flex: 1 },
+  cTime: { ...type.caption, color: colors.textFaint },
+  cBody: { ...type.label, fontWeight: "400", color: colors.ink, lineHeight: 20, marginTop: 3 },
+
+  composer: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, marginTop: spacing.md },
+  cInput: {
+    flex: 1, minHeight: 48, maxHeight: 120, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    paddingHorizontal: spacing.md, paddingVertical: 12,
+    ...type.label, fontWeight: "400", color: colors.ink,
+  },
+  cSend: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
+  cRule: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: spacing.sm },
 });
-
-
-

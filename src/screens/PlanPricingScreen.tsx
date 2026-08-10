@@ -1,29 +1,36 @@
-﻿// Plan & Pricing (V2). UI-only; tiers + prices in TIERS config. Toggle sits
-// below Basic and governs paid tiers only. Choose -> Checkout.
+// ============================================================================
+// Plans and pricing - FlagRisk v2.1
+// Designed, not rebuilt: no mockup exists for commerce.
+//   header | lead | period segmented control | tier cards | custom coverage
+// Paid tiers are white cards with a hairline border. Premium is the one ink
+// card, because it is the tier testers reached for and ink is how 2.1 signals
+// primacy. Lime appears only as a label on ink.
+// Logic unchanged: quote_coverage, the km stepper, the unlimited toggle, the
+// rank gate that stops you buying a tier below your own.
+// ============================================================================
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Check, Plus, Minus, Globe } from "lucide-react-native";
+import { ArrowLeft, Check, Plus, Minus, Globe } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { colors, radius, spacing, type, elevation } from "../theme";
 
 type Period = "monthly" | "annual";
 
 const TIERS = [
-  { id: "basic", name: "Basic", monthly: 0, annual: 0, radius: "5 km", retention: "7 days", ads: "Light ads", verification: "Standard", paid: false, grad: ["#888","#888"] as const },
-  { id: "standard", name: "Standard", monthly: 700, annual: 7000, radius: "15 km", retention: "30 days", ads: "Ad-free", verification: "Standard", paid: true, grad: ["#5e9e1a","#8fd13f"] as const },
-  { id: "pro", name: "Pro", monthly: 1300, annual: 13000, radius: "50 km", retention: "90 days", ads: "Ad-free", verification: "Standard", paid: true, grad: ["#2f7d12","#5fae28"] as const },
-  { id: "premium", name: "Premium", monthly: 2500, annual: 25000, radius: "500 km", retention: "180 days", ads: "Ad-free", verification: "Priority", paid: true, grad: ["#14532d","#2f7d3f"] as const },
+  { id: "basic", name: "Basic", monthly: 0, annual: 0, radius: "5 km", retention: "7 days", ads: "Light ads", verification: "Standard", paid: false, hero: false },
+  { id: "standard", name: "Standard", monthly: 700, annual: 7000, radius: "15 km", retention: "30 days", ads: "Ad free", verification: "Standard", paid: true, hero: false },
+  { id: "pro", name: "Pro", monthly: 1300, annual: 13000, radius: "50 km", retention: "90 days", ads: "Ad free", verification: "Standard", paid: true, hero: false },
+  { id: "premium", name: "Premium", monthly: 2500, annual: 25000, radius: "500 km", retention: "180 days", ads: "Ad free", verification: "Priority", paid: true, hero: true },
 ];
+
+const RANK: Record<string, number> = { basic: 0, standard: 1, pro: 2, premium: 3 };
 
 function naira(n: number) { return "NGN " + n.toLocaleString(); }
 
 export function PlanPricingScreen() {
   const navigation = useNavigation<any>();
-  const { colors, glass, gradients, glow } = useTheme();
   const [period, setPeriod] = useState<Period>("monthly");
   const [current, setCurrent] = useState("basic");
   const [customKm, setCustomKm] = useState(600);
@@ -51,197 +58,248 @@ export function PlanPricingScreen() {
     setCustomKm((k) => Math.max(600, Math.min(5000, k + delta)));
   }
 
-  const Feature = ({ label, value, onTile }: { label: string; value: string; onTile: boolean }) => (
+  const canBuy = (id: string) => (RANK[id] ?? 99) > (RANK[current] ?? 0);
+
+  const Feature = ({ value, label, hero }: { value: string; label: string; hero: boolean }) => (
     <View style={styles.featureRow}>
-      <Check size={15} color={onTile ? "#fff" : colors.accentOn} strokeWidth={2.5} />
-      <Text style={[styles.featureText, { color: onTile ? "rgba(255,255,255,0.95)" : colors.textMuted }]}>
-        <Text style={{ fontWeight: "700", color: onTile ? "#fff" : colors.text }}>{value}</Text> {label}
+      <Check size={15} color={hero ? colors.accent : colors.ink} strokeWidth={2.6} />
+      <Text style={[styles.featureText, hero && { color: "rgba(255,255,255,0.85)" }]}>
+        <Text style={[styles.featureValue, hero && { color: "#FFFFFF" }]}>{value}</Text>
+        {label ? " " + label : ""}
       </Text>
     </View>
   );
 
-  const renderTier = (t: typeof TIERS[number]) => {
+  const Tier = ({ t }: { t: typeof TIERS[number] }) => {
     const price = period === "monthly" ? t.monthly : t.annual;
     const isCurrent = current === t.id;
-    const tile = t.paid;
-    const Wrapper: any = tile ? LinearGradient : View;
-    const wrapperProps = tile
-      ? { colors: t.grad, start: { x: 0, y: 0 }, end: { x: 1, y: 1 }, style: [styles.card, { boxShadow: glow.brand } as any] }
-      : { style: [styles.card, { backgroundColor: glass.surface, borderColor: glass.stroke, borderWidth: 1 }] };
+    const hero = t.hero;
     return (
-      <Wrapper key={t.id} {...wrapperProps}>
+      <View style={[styles.card, hero && styles.cardHero, isCurrent && !hero && styles.cardCurrent]}>
         <View style={styles.cardTop}>
-          <Text style={[styles.tierName, { color: tile ? "#fff" : colors.text }]}>{t.name}</Text>
-          {isCurrent && (
-            <View style={[styles.currentBadge, { backgroundColor: tile ? "rgba(255,255,255,0.22)" : colors.accentOn + "22" }]}>
-              <Text style={[styles.currentText, { color: tile ? "#fff" : colors.accentOn }]}>Current</Text>
+          <Text style={[styles.tierName, hero && { color: "#FFFFFF" }]}>{t.name}</Text>
+          {isCurrent ? (
+            <View style={[styles.badge, hero && { backgroundColor: "rgba(255,255,255,0.18)" }]}>
+              <Text style={[styles.badgeText, hero && { color: "#FFFFFF" }]}>Current</Text>
             </View>
-          )}
+          ) : hero ? (
+            <View style={styles.badgeLime}>
+              <Text style={styles.badgeLimeText}>Widest reach</Text>
+            </View>
+          ) : null}
         </View>
+
         <View style={styles.priceRow}>
-          <Text style={[styles.price, { color: tile ? "#fff" : colors.text }]}>{price === 0 ? "Free" : naira(price)}</Text>
-          {price !== 0 && <Text style={[styles.per, { color: tile ? "rgba(255,255,255,0.85)" : colors.textMuted }]}>/{period === "monthly" ? "mo" : "yr"}</Text>}
+          <Text style={[styles.price, hero && { color: "#FFFFFF" }]}>{price === 0 ? "Free" : naira(price)}</Text>
+          {price !== 0 ? (
+            <Text style={[styles.per, hero && { color: "rgba(255,255,255,0.7)" }]}>
+              per {period === "monthly" ? "month" : "year"}
+            </Text>
+          ) : null}
         </View>
+
         <View style={styles.features}>
-          <Feature label="alert radius" value={t.radius} onTile={tile} />
-          <Feature label="history" value={t.retention} onTile={tile} />
-          <Feature label="" value={t.ads} onTile={tile} />
-          <Feature label="verification" value={t.verification} onTile={tile} />
+          <Feature value={t.radius} label="alert radius" hero={hero} />
+          <Feature value={t.retention} label="history" hero={hero} />
+          <Feature value={t.ads} label="" hero={hero} />
+          <Feature value={t.verification} label="verification" hero={hero} />
         </View>
-        {!isCurrent && canBuy(t) && (
-          <Pressable onPress={() => navigation.navigate("Checkout", { tierId: t.id, tierName: t.name, price, period })}>
-            {tile ? (
-              <View style={styles.chooseOnTile}><Text style={[styles.chooseText, { color: "#1a4012" }]}>Choose {t.name}</Text></View>
-            ) : (
-              <View style={[styles.chooseGhost, { borderColor: glass.strokeStrong }]}><Text style={[styles.chooseText, { color: colors.text }]}>Stay on Basic</Text></View>
-            )}
+
+        {isCurrent ? (
+          <View style={[styles.ctaGhost, hero && { borderColor: "rgba(255,255,255,0.3)" }]}>
+            <Text style={[styles.ctaGhostText, hero && { color: "#FFFFFF" }]}>Your current plan</Text>
+          </View>
+        ) : canBuy(t.id) ? (
+          <Pressable
+            style={[styles.cta, hero && styles.ctaOnHero]}
+            onPress={() => navigation.navigate("Checkout", { tierId: t.id, tierName: t.name, price, period })}
+          >
+            <Text style={[styles.ctaText, hero && { color: colors.ink }]}>Choose {t.name}</Text>
           </Pressable>
-        )}
-      </Wrapper>
+        ) : null}
+      </View>
     );
   };
 
-  const basic = TIERS.find((t) => !t.paid)!;
+  const basic = TIERS.filter((t) => !t.paid);
   const paid = TIERS.filter((t) => t.paid);
-  const RANK: any = { basic: 0, standard: 1, pro: 2, premium: 3 };
-  const canBuy = (t: any) => (RANK[t.id] ?? 99) > (RANK[current] ?? 0);
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-          <Text style={[styles.back, { color: colors.accentOn }]}>Back</Text>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Plans</Text>
-        <View style={{ width: 50 }} />
+        <Text style={styles.headTitle}>Plans</Text>
+        <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl }}>
-        <Text style={[styles.lead, { color: colors.text }]}>Choose your coverage</Text>
-        <Text style={[styles.sub, { color: colors.textMuted }]}>A wider alert radius and longer history. Cancel anytime.</Text>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={styles.lead}>Choose your coverage</Text>
+        <Text style={styles.sub}>A wider alert radius and longer history. Cancel at any time.</Text>
 
-        {renderTier(basic)}
+        {basic.map((t) => <Tier key={t.id} t={t} />)}
 
-        <View style={[styles.toggle, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
+        <View style={styles.segment}>
           {(["monthly", "annual"] as Period[]).map((p) => {
-            const active = period === p;
+            const on = period === p;
             return (
-              <Pressable key={p} style={{ flex: 1 }} onPress={() => setPeriod(p)}>
-                {active ? (
-                  <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.toggleBtn}>
-                    <Text style={{ color: colors.accentText, fontWeight: "800", fontSize: 14 }}>{p === "monthly" ? "Monthly" : "Annual"}</Text>
-                  </LinearGradient>
-                ) : (
-                  <View style={styles.toggleBtn}><Text style={{ color: colors.textMuted, fontWeight: "700", fontSize: 14 }}>{p === "monthly" ? "Monthly" : "Annual"}</Text></View>
-                )}
+              <Pressable key={p} style={[styles.segmentBtn, on && styles.segmentBtnOn]} onPress={() => setPeriod(p)}>
+                <Text style={[styles.segmentText, on && styles.segmentTextOn]}>
+                  {p === "monthly" ? "Monthly" : "Annual"}
+                </Text>
               </Pressable>
             );
           })}
         </View>
-        {period === "annual" && <Text style={[styles.saveHint, { color: colors.accentOn }]}>2 months free on annual plans</Text>}
+        {period === "annual" ? <Text style={styles.saveHint}>Two months free on annual plans</Text> : null}
 
-        {paid.map(renderTier)}
+        {paid.map((t) => <Tier key={t.id} t={t} />)}
 
-        <View style={[styles.customCard, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Globe size={18} color={colors.accentOn} strokeWidth={2.2} />
-            <Text style={[styles.customTitle, { color: colors.text }]}>Custom coverage</Text>
+        <View style={styles.customCard}>
+          <View style={styles.customHead}>
+            <Globe size={18} color={colors.ink} strokeWidth={2.2} />
+            <Text style={styles.customTitle}>Custom coverage</Text>
           </View>
-          <Text style={[styles.customSub, { color: colors.textMuted }]}>Reach your own people beyond 500 km. A recurring monthly add-on, available on any plan.</Text>
+          <Text style={styles.customSub}>
+            Reach your own people beyond 500 km. A recurring monthly add-on, available on any plan.
+          </Text>
 
           {!customUnlimited ? (
             <>
               <View style={styles.stepperRow}>
-                <Pressable style={[styles.stepBtn, { borderColor: glass.strokeStrong }]} onPress={() => stepKm(-100)}>
-                  <Minus size={20} color={colors.text} strokeWidth={2.5} />
+                <Pressable style={styles.stepBtn} onPress={() => stepKm(-100)}>
+                  <Minus size={19} color={colors.ink} strokeWidth={2.5} />
                 </Pressable>
                 <View style={{ alignItems: "center", flex: 1 }}>
-                  <Text style={[styles.kmValue, { color: colors.text }]}>{customKm.toLocaleString()} km</Text>
-                  <Text style={[styles.kmHint, { color: colors.textMuted }]}>adjust in 100 km steps</Text>
+                  <Text style={styles.kmValue}>{customKm.toLocaleString()} km</Text>
+                  <Text style={styles.kmHint}>Adjust in 100 km steps</Text>
                 </View>
-                <Pressable style={[styles.stepBtn, { borderColor: glass.strokeStrong }]} onPress={() => stepKm(100)}>
-                  <Plus size={20} color={colors.text} strokeWidth={2.5} />
+                <Pressable style={styles.stepBtn} onPress={() => stepKm(100)}>
+                  <Plus size={19} color={colors.ink} strokeWidth={2.5} />
                 </Pressable>
               </View>
               <View style={styles.quoteRow}>
-                <Text style={[styles.quoteLabel, { color: colors.textMuted }]}>Monthly</Text>
-                <Text style={[styles.quoteValue, { color: colors.accentOn }]}>{customQuote != null ? naira(customQuote) : "..."}</Text>
+                <Text style={styles.quoteLabel}>Monthly</Text>
+                <Text style={styles.quoteValue}>{customQuote != null ? naira(customQuote) : "..."}</Text>
               </View>
             </>
           ) : (
             <View style={styles.quoteRow}>
-              <Text style={[styles.quoteLabel, { color: colors.text }]}>Global / Unlimited</Text>
-              <Text style={[styles.quoteValue, { color: colors.accentOn }]}>{customQuote != null ? naira(customQuote) + "/mo" : "..."}</Text>
+              <Text style={styles.quoteLabel}>Global, unlimited</Text>
+              <Text style={styles.quoteValue}>{customQuote != null ? naira(customQuote) + " per month" : "..."}</Text>
             </View>
           )}
 
-          <Pressable style={[styles.unlimitedToggle, { borderColor: customUnlimited ? colors.accentOn : glass.strokeStrong }]}
-            onPress={() => setCustomUnlimited((v) => !v)}>
-            <Globe size={16} color={customUnlimited ? colors.accentOn : colors.textMuted} strokeWidth={2.2} />
-            <Text style={[styles.unlimitedText, { color: customUnlimited ? colors.accentOn : colors.textMuted }]}>
-              {customUnlimited ? "Unlimited selected, tap for custom km" : "Or go Global / Unlimited"}
+          <Pressable
+            style={[styles.unlimitedToggle, customUnlimited && styles.unlimitedToggleOn]}
+            onPress={() => setCustomUnlimited((v) => !v)}
+          >
+            <Globe size={16} color={customUnlimited ? colors.accent : colors.ink} strokeWidth={2.2} />
+            <Text style={[styles.unlimitedText, customUnlimited && { color: colors.accent }]}>
+              {customUnlimited ? "Unlimited selected. Tap for custom distance." : "Or go global and unlimited"}
             </Text>
           </Pressable>
 
-          <Pressable onPress={() => navigation.navigate("Checkout", {
-            tierId: customUnlimited ? "custom_unlimited" : "custom",
-            tierName: customUnlimited ? "Global Coverage" : `Custom ${customKm.toLocaleString()} km`,
-            price: customQuote ?? 0, period: "monthly",
-            customKm: customUnlimited ? null : customKm, customUnlimited,
-          })}>
-            <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.customBuy, { boxShadow: glow.brand } as any]}>
-              <Text style={[styles.customBuyText, { color: colors.accentText }]}>Get this coverage</Text>
-            </LinearGradient>
+          <Pressable
+            style={styles.customBuy}
+            onPress={() => navigation.navigate("Checkout", {
+              tierId: customUnlimited ? "custom_unlimited" : "custom",
+              tierName: customUnlimited ? "Global coverage" : "Custom " + customKm.toLocaleString() + " km",
+              price: customQuote ?? 0,
+              period: "monthly",
+              customKm: customUnlimited ? null : customKm,
+              customUnlimited,
+            })}
+          >
+            <Text style={styles.customBuyText}>Get this coverage</Text>
           </Pressable>
         </View>
 
-        <Text style={[styles.foot, { color: colors.textMuted }]}>Network of 7 and video capture are included on every plan. Panic 300 m stranger radius is fixed.</Text>
+        <Text style={styles.foot}>
+          A network of up to 7 people and video capture are included on every plan. The panic alert
+          radius for nearby strangers is fixed and does not change with your plan.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  back: { fontSize: 16, fontWeight: "700" },
-  headerTitle: { fontSize: 18, fontWeight: "800" },
-  lead: { fontSize: 24, fontWeight: "800" },
-  sub: { fontSize: 14, marginTop: 4, marginBottom: spacing.lg },
-  toggle: { flexDirection: "row", borderRadius: radius.md, borderWidth: 1, padding: 4, gap: 4, marginTop: spacing.lg },
-  toggleBtn: { height: 42, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
-  saveHint: { fontSize: 13, fontWeight: "700", textAlign: "center", marginTop: spacing.sm },
-  card: { borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, overflow: "hidden" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: spacing.xxl },
+  lead: { ...type.title, color: colors.ink },
+  sub: { ...type.label, fontWeight: "400", color: colors.textMuted, marginTop: 4, marginBottom: spacing.lg },
+
+  segment: {
+    flexDirection: "row", backgroundColor: "#F0F0F0", borderRadius: radius.sm,
+    marginTop: spacing.lg, padding: 4, gap: 4,
+  },
+  segmentBtn: { flex: 1, height: 36, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  segmentBtnOn: { backgroundColor: "#333333" },
+  segmentText: { fontSize: 13, lineHeight: 17, fontWeight: "500", color: "#91958E" },
+  segmentTextOn: { color: "#FFFFFF", fontWeight: "600" },
+  saveHint: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center", marginTop: spacing.sm },
+
+  card: {
+    backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, marginTop: spacing.md,
+  },
+  cardHero: { backgroundColor: colors.ink, borderColor: colors.ink, ...elevation.card },
+  cardCurrent: { borderColor: colors.borderStrong },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  tierName: { fontSize: 20, fontWeight: "800" },
-  currentBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill },
-  currentText: { fontSize: 12, fontWeight: "800" },
-  priceRow: { flexDirection: "row", alignItems: "flex-end", marginTop: 6, gap: 4 },
-  price: { fontSize: 30, fontWeight: "900" },
-  per: { fontSize: 15, fontWeight: "600", marginBottom: 5 },
+  tierName: { ...type.subheading, color: colors.ink },
+  badge: { backgroundColor: "#F0F0F0", borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
+  badgeText: { fontSize: 11, lineHeight: 15, fontWeight: "600", color: colors.ink },
+  badgeLime: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 },
+  badgeLimeText: { fontSize: 11, lineHeight: 15, fontWeight: "700", color: colors.ink },
+
+  priceRow: { flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: spacing.sm },
+  price: { ...type.title, color: colors.ink },
+  per: { ...type.caption, color: colors.textMuted },
+
   features: { marginTop: spacing.md, gap: 8 },
-  featureRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  featureText: { fontSize: 14 },
-  chooseOnTile: { backgroundColor: "#ffffff", height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  chooseGhost: { height: 48, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  chooseText: { fontSize: 15, fontWeight: "800" },
-  customCard: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, marginTop: spacing.lg },
-  customTitle: { fontSize: 18, fontWeight: "800" },
-  customSub: { fontSize: 13, marginTop: 4, lineHeight: 18 },
-  stepperRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.lg, gap: spacing.md },
-  stepBtn: { width: 52, height: 52, borderRadius: 26, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  kmValue: { fontSize: 26, fontWeight: "900" },
-  kmHint: { fontSize: 12, marginTop: 2 },
-  quoteRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.lg },
-  quoteLabel: { fontSize: 15, fontWeight: "600" },
-  quoteValue: { fontSize: 22, fontWeight: "900" },
-  unlimitedToggle: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: radius.md, height: 46, marginTop: spacing.lg },
-  unlimitedText: { fontSize: 14, fontWeight: "700" },
-  customBuy: { height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  customBuyText: { fontSize: 16, fontWeight: "800" },
-  foot: { fontSize: 12, lineHeight: 18, marginTop: spacing.xl, textAlign: "center" },
+  featureRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  featureText: { ...type.caption, color: colors.textMuted, flex: 1 },
+  featureValue: { fontWeight: "700", color: colors.ink },
+
+  cta: { height: 48, borderRadius: radius.sm, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
+  ctaOnHero: { backgroundColor: colors.accent },
+  ctaText: { ...type.label, fontWeight: "600", color: colors.accent },
+  ctaGhost: {
+    height: 48, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center", marginTop: spacing.md,
+  },
+  ctaGhostText: { ...type.label, fontWeight: "600", color: colors.textMuted },
+
+  customCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
+  customHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  customTitle: { ...type.subheading, color: colors.ink },
+  customSub: { ...type.caption, color: colors.textMuted, marginTop: 6, lineHeight: 17 },
+  stepperRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.md },
+  stepBtn: {
+    width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center", backgroundColor: colors.bg,
+  },
+  kmValue: { ...type.subheading, color: colors.ink },
+  kmHint: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+  quoteRow: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  quoteLabel: { ...type.label, fontWeight: "500", color: colors.ink },
+  quoteValue: { ...type.subheading, color: colors.ink },
+  unlimitedToggle: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    height: 44, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, marginTop: spacing.md,
+  },
+  unlimitedToggleOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  unlimitedText: { ...type.caption, fontWeight: "600", color: colors.ink },
+  customBuy: { height: 48, borderRadius: radius.sm, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
+  customBuyText: { ...type.label, fontWeight: "600", color: colors.accent },
+  foot: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: spacing.lg },
 });
-
-
-
-

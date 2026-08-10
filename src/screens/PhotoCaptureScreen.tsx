@@ -9,8 +9,10 @@ import { Alert, Pressable, StyleSheet, Text, View, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as FileSystem from "expo-file-system/legacy";
+import { decode as decodeBase64 } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
-import { colors, radius, spacing } from "../theme";
+import { colors, radius, spacing, type } from "../theme";
 
 export function PhotoCaptureScreen() {
   const navigation = useNavigation();
@@ -61,8 +63,14 @@ export function PhotoCaptureScreen() {
       const { data: u } = await supabase.auth.getUser();
       const token = sess.session ? sess.session.access_token : null;
       const path = (u.user ? u.user.id : "anon") + "/" + Date.now() + ".jpg";
-      const res = await fetch(uri);
-      const blob = await res.blob();
+      // Read the local file into real bytes. fetch(uri).blob() does NOT work on
+      // React Native for file:// URIs - it yields a registry-backed Blob that
+      // XHR sends as an empty body, so the object lands in Storage at 0 bytes
+      // and every later read renders blank. Base64 -> ArrayBuffer is the path
+      // that works (same as SupportThreadScreen).
+      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = decodeBase64(b64);
+      if (!bytes || bytes.byteLength === 0) throw new Error("The captured image was empty. Please retake it.");
       const uploadUrl = "https://aqgkntulbuqqqjxjafmw.supabase.co/storage/v1/object/report-evidence/" + path;
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -73,7 +81,7 @@ export function PhotoCaptureScreen() {
         xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) setProgress(Math.min(1, e.loaded / e.total)); };
         xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(new Error("Upload failed (" + xhr.status + ")")); };
         xhr.onerror = () => reject(new Error("Network error during upload"));
-        xhr.send(blob);
+        xhr.send(bytes);
       });
       setUploading(false);
       const cb = route.params ? route.params.onCaptured : null;
@@ -90,9 +98,9 @@ export function PhotoCaptureScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}><Text style={styles.back}>{"< Cancel"}</Text></Pressable>
-        <Text style={styles.headerTitle}>Capture evidence</Text>
-        <View style={{ width: 60 }} />
+        <Pressable onPress={() => navigation.goBack()} hitSlop={12}><Text style={styles.back}>{"Cancel"}</Text></Pressable>
+        <Text style={styles.headerTitle}>Photo evidence</Text>
+        <View style={{ width: 54 }} />
       </View>
       <View style={styles.cameraWrap}>
         {preview ? (
@@ -111,7 +119,7 @@ export function PhotoCaptureScreen() {
         )}
         {uploading && (
           <View style={styles.overlay}>
-            <Text style={styles.overlayText}>Uploading evidence...</Text>
+            <Text style={styles.overlayText}>Uploading evidence</Text>
             <View style={styles.progressTrack}><View style={[styles.progressFill, { width: (Math.round(progress * 100)) + "%" }]} /></View>
             <Text style={styles.overlaySub}>{Math.round(progress * 100)}%</Text>
           </View>
@@ -123,12 +131,12 @@ export function PhotoCaptureScreen() {
             <Pressable style={[styles.shutterBtn, (!camReady || capturing) && { opacity: 0.4 }]} onPress={takePhoto} disabled={!camReady || capturing || uploading}>
               <View style={styles.shutterInner} />
             </Pressable>
-            <Text style={styles.hint}>{!camReady ? "Starting camera..." : capturing ? "Capturing..." : "Tap to take a photo"}</Text>
+            <Text style={styles.hint}>{!camReady ? "Starting camera" : capturing ? "Capturing" : "Tap to take a photo"}</Text>
           </>
         ) : (
           <View style={styles.reviewRow}>
             <Pressable style={styles.retakeBtn} onPress={() => setPreview(null)} disabled={uploading}><Text style={styles.retakeText}>Retake</Text></Pressable>
-            <Pressable style={styles.useBtn} onPress={() => upload(preview)} disabled={uploading}><Text style={styles.useText}>{uploading ? "Uploading..." : "Use photo"}</Text></Pressable>
+            <Pressable style={styles.useBtn} onPress={() => upload(preview)} disabled={uploading}><Text style={styles.useText}>{uploading ? "Uploading" : "Use photo"}</Text></Pressable>
           </View>
         )}
       </View>
@@ -137,23 +145,23 @@ export function PhotoCaptureScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#000" },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  back: { color: colors.accent, fontSize: 16, fontWeight: "700" },
-  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  cameraWrap: { flex: 1, overflow: "hidden", margin: spacing.md, borderRadius: radius.lg },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
-  overlayText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  overlaySub: { color: "#fff", fontSize: 15, fontWeight: "700", marginTop: 10 },
-  progressTrack: { width: 220, height: 10, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.25)", marginTop: 16, overflow: "hidden" },
-  progressFill: { height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  controls: { alignItems: "center", paddingVertical: spacing.xl, gap: spacing.md },
-  shutterBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: "#fff", alignItems: "center", justifyContent: "center" },
-  shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#fff" },
-  hint: { color: "#fff", fontSize: 14 },
-  reviewRow: { flexDirection: "row", gap: spacing.lg },
-  retakeBtn: { paddingVertical: 14, paddingHorizontal: 28, borderRadius: radius.md, borderWidth: 1, borderColor: "#fff" },
-  retakeText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  useBtn: { paddingVertical: 14, paddingHorizontal: 28, borderRadius: radius.md, backgroundColor: colors.accent },
-  useText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  safe: { flex: 1, backgroundColor: colors.inkDeep },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.gutter, paddingVertical: spacing.md },
+  back: { ...type.label, fontWeight: "600", color: "#FFFFFF" },
+  headerTitle: { ...type.subheading, color: "#FFFFFF" },
+  cameraWrap: { flex: 1, overflow: "hidden", marginHorizontal: spacing.md, marginBottom: spacing.md, borderRadius: radius.lg, backgroundColor: "#000000" },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,1,20,0.72)", alignItems: "center", justifyContent: "center" },
+  overlayText: { ...type.subheading, color: "#FFFFFF" },
+  overlaySub: { ...type.label, fontWeight: "600", color: "#FFFFFF", marginTop: 10 },
+  progressTrack: { width: 220, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.25)", marginTop: 16, overflow: "hidden" },
+  progressFill: { height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  controls: { alignItems: "center", paddingBottom: spacing.xl, gap: spacing.md },
+  shutterBtn: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#FFFFFF" },
+  hint: { ...type.caption, color: "rgba(255,255,255,0.75)" },
+  reviewRow: { flexDirection: "row", gap: spacing.md, paddingHorizontal: spacing.gutter, alignSelf: "stretch" },
+  retakeBtn: { flex: 1, height: 52, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.4)", alignItems: "center", justifyContent: "center" },
+  retakeText: { ...type.label, fontWeight: "600", color: "#FFFFFF" },
+  useBtn: { flex: 1, height: 52, borderRadius: radius.md, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
+  useText: { ...type.label, fontWeight: "600", color: colors.ink },
 });

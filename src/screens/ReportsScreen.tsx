@@ -1,17 +1,25 @@
-// Reports - "My Reports" (V2 rich + theming). Gradient empty-state chip, lifted cards.
-// Shows humanized labels (no raw DB values), a risk band instead of raw score, and an
-// evidence badge that appears only when media is attached (tap to view full-screen).
-import { useCallback, useState } from "react";
-import { FlatList, Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+// ============================================================================
+// Reports - FlagRisk v2.1
+// Rebuilt against Figma "Reports" (node 1:2713) and the 4.0 Reports flow.
+//   header: 36pt round back | title 20/700 centred | 36pt #F0F0F0 round right
+//   search 327x42 r16 #FAFAFA | day group label 12/600 | rows with 48pt tile
+// Thumbnails are category tiles rather than the evidence image: rendering the
+// real media would need one signed-URL round trip per row. The Attached badge
+// still opens the full-screen viewer on demand.
+// ============================================================================
+import { useCallback, useMemo, useState } from "react";
+import { Image, Modal, Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
-import { ClipboardList, Paperclip, X } from "lucide-react-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import {
+  ArrowLeft, EllipsisVertical, Search, Paperclip, X, TriangleAlert,
+  Flame, Waves, Zap, Users, Car, ShieldAlert, ArrowDownUp, Check, Image as ImageIcon,
+} from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
 import { humanize, scoreBand } from "../format";
 
 type Report = {
@@ -20,11 +28,36 @@ type Report = {
   alert_level: string | null; status: string; media_url: string | null;
 };
 
+const CAT_ICON: Record<string, any> = {
+  fire_outbreak: Flame, flood: Waves, storm: Waves, electric_hazard: Zap,
+  protest: Users, traffic_jam: Car, robbery: ShieldAlert, kidnapping: ShieldAlert,
+  terrorism: ShieldAlert, vandalism: ShieldAlert, animal_threat: TriangleAlert,
+  earthquake: TriangleAlert,
+};
+
 function isVideo(url: string) {
   return /\.(mp4|mov|m4v|webm|3gp|mkv)(\?|$)/i.test(url);
 }
 
-// Full-screen viewer for a single image or video.
+function dayLabel(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const same = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (same(d, now)) return "Today";
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (same(d, y)) return "Yesterday";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function timeAgo(iso: string) {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return Math.floor(diff / 60) + " mins ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + " hrs ago";
+  return new Date(iso).toLocaleDateString();
+}
+
 function EvidenceViewer({ url, onClose }: { url: string; onClose: () => void }) {
   const video = isVideo(url);
   const player = useVideoPlayer(video ? url : "", (p) => { if (video) { p.loop = false; p.play(); } });
@@ -32,7 +65,7 @@ function EvidenceViewer({ url, onClose }: { url: string; onClose: () => void }) 
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.viewerWrap}>
         <Pressable style={styles.viewerClose} onPress={onClose} hitSlop={12}>
-          <X size={28} color="#ffffff" strokeWidth={2.5} />
+          <X size={28} color="#FFFFFF" strokeWidth={2.5} />
         </Pressable>
         {video ? (
           <VideoView style={styles.viewerMedia} player={player} contentFit="contain" allowsFullscreen nativeControls />
@@ -45,13 +78,17 @@ function EvidenceViewer({ url, onClose }: { url: string; onClose: () => void }) 
 }
 
 export function ReportsScreen() {
-  const { colors, glass, gradients, glow } = useTheme();
+  const navigation = useNavigation<any>();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewing, setViewing] = useState<string | null>(null);
-
-  const bandColor = (tone: string) =>
-    tone === "high" ? colors.danger : tone === "medium" ? colors.warning : colors.textMuted;
+  const [query, setQuery] = useState("");
+  const [detail, setDetail] = useState<Report | null>(null);
+  const [detailMedia, setDetailMedia] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [newestFirst, setNewestFirst] = useState(true);
+  const [onlyEvidence, setOnlyEvidence] = useState(false);
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(useCallback(() => {
     (async () => {
@@ -68,53 +105,194 @@ export function ReportsScreen() {
     })();
   }, []));
 
+  async function openDetail(r: Report) {
+    setDetail(r);
+    setDetailMedia(null);
+    if (!r.media_url) return;
+    const { data } = await supabase.storage.from("report-evidence").createSignedUrl(r.media_url, 3600);
+    if (data) setDetailMedia(data.signedUrl);
+  }
+
   async function openEvidence(path: string) {
     const { data, error } = await supabase.storage.from("report-evidence").createSignedUrl(path, 3600);
-    if (error || !data) { showAlert({ title: "Could not open", message: "This evidence is unavailable right now." }); return; }
+    if (error || !data) {
+      showAlert({ title: "Could not open", message: "This evidence is unavailable right now." });
+      return;
+    }
     setViewing(data.signedUrl);
   }
 
-  return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-      <Text style={[styles.header, { color: colors.text }]}>My Reports</Text>
+  const sections = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let filtered = q
+      ? reports.filter((r) => humanize(r.category_id).toLowerCase().includes(q))
+      : reports.slice();
+    if (onlyEvidence) filtered = filtered.filter((r) => !!r.media_url);
+    filtered.sort((a, b) => {
+      const d = new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime();
+      return newestFirst ? d : -d;
+    });
+    const groups: Record<string, Report[]> = {};
+    const order: string[] = [];
+    filtered.forEach((r) => {
+      const k = dayLabel(r.occurred_at);
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(r);
+    });
+    return order.map((k) => ({ title: k, data: groups[k] }));
+  }, [reports, query, newestFirst, onlyEvidence]);
 
-      {!loading && reports.length === 0 ? (
+  const chipFor = (tone: string) =>
+    tone === "high"
+      ? { bg: "#FBD1CF", fg: colors.riskHigh, label: "High Risk" }
+      : tone === "medium"
+      ? { bg: "#FDE7CF", fg: "#B26A12", label: "Medium" }
+      : { bg: "#EBEBEB", fg: colors.textMuted, label: "Low" };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <View style={styles.header}>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
+        </Pressable>
+        <Text style={styles.headTitle}>Reports</Text>
+        <Pressable onPress={() => setMenuOpen(true)} style={styles.headBtnFilled} hitSlop={8}>
+          <EllipsisVertical size={18} color={colors.ink} strokeWidth={2} />
+        </Pressable>
+      </View>
+
+      <View style={styles.searchWrap}>
+        <Search size={16} color="#9F9F9F" strokeWidth={2} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search"
+          placeholderTextColor="#9F9F9F"
+          style={styles.searchInput}
+        />
+      </View>
+
+      {!loading && sections.length === 0 ? (
         <View style={styles.empty}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.emptyChip, { boxShadow: glow.brand } as any]}>
-            <ClipboardList size={30} color={colors.accentText} strokeWidth={2} />
-          </LinearGradient>
-          <Text style={[styles.emptyText, { color: colors.text }]}>You haven't flagged anything yet.</Text>
-          <Text style={[styles.emptySub, { color: colors.textMuted }]}>Reports you file will show here with their status.</Text>
+          <Text style={styles.emptyTitle}>
+            {query ? "Nothing matches that search" : "No risks reported"}
+          </Text>
+          <Text style={styles.emptySub}>
+            {query
+              ? "Try a different word."
+              : "You have not reported any incidents yet. Help keep your community informed by reporting hazards around you."}
+          </Text>
         </View>
       ) : (
-        <FlatList
-          data={reports}
+        <SectionList
+          sections={sections}
           keyExtractor={(r) => r.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120, gap: spacing.md }}
+          stickySectionHeadersEnabled={false}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.list}
+          renderSectionHeader={({ section }) => (
+            <Text style={styles.dayLabel}>{section.title}</Text>
+          )}
           renderItem={({ item }) => {
             const band = scoreBand(item.weighted_score);
+            const chip = chipFor(band.tone);
+            const Icon = CAT_ICON[item.category_id] ?? TriangleAlert;
             return (
-              <View style={[styles.card, { backgroundColor: glass.surface, borderColor: glass.stroke, boxShadow: glow.soft } as any]}>
-                <View style={styles.cardTop}>
-                  <Text style={[styles.cat, { color: colors.text }]}>{humanize(item.category_id)}</Text>
+              <Pressable style={styles.row} onPress={() => openDetail(item)}>
+                <View style={styles.thumb}>
+                  <Icon size={20} color={chip.fg} strokeWidth={2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.rowTop}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>{humanize(item.category_id)}</Text>
+                    <View style={[styles.chip, { backgroundColor: chip.bg }]}>
+                      <Text style={[styles.chipText, { color: chip.fg }]}>{chip.label}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.rowSub} numberOfLines={1}>
+                    Visibility: {humanize(item.alert_level) || "On the map"}
+                  </Text>
                   {item.media_url ? (
-                    <Pressable onPress={() => openEvidence(item.media_url!)} style={[styles.badge, { backgroundColor: colors.accentOn + "22", borderColor: colors.accentOn }]}>
-                      <Paperclip size={13} color={colors.accentOn} strokeWidth={2.5} />
-                      <Text style={[styles.badgeText, { color: colors.accentOn }]}>Attached</Text>
-                    </Pressable>
+                    <View style={styles.attachRow}>
+                      <Paperclip size={12} color={colors.textMuted} strokeWidth={2} />
+                      <Text style={styles.attachText}>Evidence attached</Text>
+                    </View>
                   ) : null}
                 </View>
-                <Text style={[styles.meta, { color: colors.textMuted }]}>{new Date(item.occurred_at).toLocaleString()}</Text>
-                <View style={styles.detailRow}>
-                  <Text style={[styles.detail, { color: colors.textMuted }]}>Visibility: {humanize(item.alert_level)}</Text>
-                  <Text style={[styles.detail, { color: bandColor(band.tone), fontWeight: "700" }]}>Risk: {band.label}</Text>
-                </View>
-              </View>
+                <Text style={styles.rowTime}>{timeAgo(item.occurred_at)}</Text>
+              </Pressable>
             );
           }}
         />
       )}
+
+      <Modal visible={!!detail} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setDetail(null)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]} onPress={() => {}}>
+            <View style={styles.grabber} />
+            {detail ? (() => {
+              const band = scoreBand(detail.weighted_score);
+              const chip = chipFor(band.tone);
+              const pct = Math.round(Math.max(0, Math.min(1, Number(detail.weighted_score ?? 0))) * 100);
+              const Icon = CAT_ICON[detail.category_id] ?? TriangleAlert;
+              return (
+                <>
+                  {detailMedia ? (
+                    <Pressable onPress={() => { setViewing(detailMedia); }}>
+                      <Image source={{ uri: detailMedia }} style={styles.detMedia} resizeMode="cover" />
+                    </Pressable>
+                  ) : (
+                    <View style={[styles.detMedia, styles.detMediaEmpty]}>
+                      <Icon size={30} color={colors.textFaint} strokeWidth={1.8} />
+                      <Text style={styles.detNoMedia}>No evidence attached</Text>
+                    </View>
+                  )}
+
+                  <View style={styles.detHead}>
+                    <Text style={styles.detTitle} numberOfLines={1}>{humanize(detail.category_id)}</Text>
+                    <Text style={styles.detPct}>{pct}%</Text>
+                  </View>
+                  <Text style={styles.detMeta}>
+                    {timeAgo(detail.occurred_at)}  |  {humanize(detail.alert_level) || "On the map"}
+                  </Text>
+
+                  <Text style={styles.detBody}>
+                    You reported {humanize(detail.category_id).toLowerCase()} {timeAgo(detail.occurred_at)}.
+                    This is the weight the engine gave it, after your standing, how precise the location
+                    was, and how severe the category is.
+                  </Text>
+
+                  <View style={styles.detTrack}>
+                    <View style={[styles.detFill, { width: pct + "%", backgroundColor: chip.fg }]} />
+                  </View>
+                  <Text style={styles.detNote}>
+                    Counts at {pct} percent now, fading as it ages.
+                  </Text>
+                </>
+              );
+            })() : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={menuOpen} transparent animationType="slide" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]} onPress={() => {}}>
+            <View style={styles.grabber} />
+            <Text style={styles.menuTitle}>Sort and filter</Text>
+            <Pressable style={styles.menuRow} onPress={() => setNewestFirst((v) => !v)}>
+              <ArrowDownUp size={19} color={colors.ink} strokeWidth={2} />
+              <Text style={styles.menuText}>{newestFirst ? "Newest first" : "Oldest first"}</Text>
+              <Check size={17} color={colors.ink} strokeWidth={2.4} />
+            </Pressable>
+            <Pressable style={styles.menuRow} onPress={() => setOnlyEvidence((v) => !v)}>
+              <ImageIcon size={19} color={colors.ink} strokeWidth={2} />
+              <Text style={styles.menuText}>Only reports with evidence</Text>
+              {onlyEvidence ? <Check size={17} color={colors.ink} strokeWidth={2.4} /> : null}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {viewing ? <EvidenceViewer url={viewing} onClose={() => setViewing(null)} /> : null}
     </SafeAreaView>
@@ -122,20 +300,72 @@ export function ReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { fontSize: 22, fontWeight: "800", textAlign: "center", paddingVertical: spacing.md },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  emptyChip: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center", marginBottom: spacing.md },
-  emptyText: { fontSize: 16, fontWeight: "700" },
-  emptySub: { fontSize: 14, marginTop: 4, textAlign: "center" },
-  card: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
-  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  cat: { fontSize: 17, fontWeight: "700" },
-  badge: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
-  badgeText: { fontSize: 12, fontWeight: "700" },
-  meta: { fontSize: 13, marginTop: 6 },
-  detailRow: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm },
-  detail: { fontSize: 13 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  header: {
+    height: 36, flexDirection: "row", alignItems: "center",
+    marginHorizontal: spacing.gutter, marginTop: spacing.md,
+  },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headBtnFilled: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: "#F0F0F0",
+    alignItems: "center", justifyContent: "center",
+  },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
+  },
+  searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
+
+  list: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: screenBottomPad },
+  dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginBottom: spacing.xs },
+
+  row: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  thumb: {
+    width: 48, height: 48, borderRadius: radius.sm, backgroundColor: "#F0F0F0",
+    alignItems: "center", justifyContent: "center",
+  },
+  rowTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  rowTitle: { ...type.label, fontWeight: "600", color: colors.ink, flexShrink: 1 },
+  chip: { borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  chipText: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
+  rowSub: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  attachRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  attachText: { ...type.caption, color: colors.textMuted },
+  rowTime: { ...type.caption, color: colors.textFaint, alignSelf: "flex-start", marginTop: 2 },
+
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
+  emptyTitle: { ...type.subheading, color: colors.ink },
+  emptySub: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: 6, lineHeight: 18 },
+
+  backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
+  sheet: {
+    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
+  },
+  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  detMedia: { width: "100%", height: 200, borderRadius: radius.md, backgroundColor: "#F0F0F0" },
+  detMediaEmpty: { alignItems: "center", justifyContent: "center", gap: 8 },
+  detNoMedia: { ...type.caption, color: colors.textMuted },
+  detHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
+  detTitle: { ...type.heading, color: colors.ink, flex: 1 },
+  detPct: { ...type.heading, color: colors.ink },
+  detMeta: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+  detBody: { ...type.label, fontWeight: "400", color: colors.ink, lineHeight: 21, marginTop: spacing.md },
+  detTrack: { height: 8, borderRadius: 4, backgroundColor: "#EBEBEB", marginTop: spacing.md, overflow: "hidden" },
+  detFill: { height: 8, borderRadius: 4 },
+  detNote: { ...type.caption, color: colors.textMuted, marginTop: 8 },
+
+  menuTitle: { ...type.subheading, color: colors.ink, marginBottom: spacing.sm },
+  menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.ms, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  menuText: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink },
+
   viewerWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.95)", alignItems: "center", justifyContent: "center" },
   viewerClose: { position: "absolute", top: 50, right: 20, zIndex: 10, width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   viewerMedia: { width: "100%", height: "80%" },

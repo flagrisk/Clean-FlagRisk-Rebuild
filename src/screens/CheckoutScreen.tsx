@@ -1,15 +1,21 @@
-﻿// Checkout (V2). paystack-init -> open checkout -> confirm (DB first, then verify).
+// ============================================================================
+// Checkout - FlagRisk v2.1
+// Designed, not rebuilt: no mockup exists for commerce.
+//   header | order summary card #FAFAFA | payment method | trust line
+//   ink pay button with a lime label, pinned at the foot
+// Logic unchanged: paystack-init, external browser, then confirmPayment which
+// polls the profile tier first and paystack-verify second, then apply_custom_
+// coverage for custom purchases.
+// ============================================================================
 import { useState } from "react";
-import { showAlert } from "../components/Feedback";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
-import { ShieldCheck, CreditCard, Lock } from "lucide-react-native";
+import { ArrowLeft, ShieldCheck, CreditCard, Lock } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { showAlert } from "../components/Feedback";
+import { colors, radius, spacing, type } from "../theme";
 
 function naira(n: number) { return "NGN " + n.toLocaleString(); }
 
@@ -17,7 +23,6 @@ export function CheckoutScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { tierId, tierName, price, period, customKm, customUnlimited } = route.params ?? {};
-  const { colors, glass, gradients, glow } = useTheme();
   const [paying, setPaying] = useState(false);
 
   const isCustom = tierId === "custom" || tierId === "custom_unlimited";
@@ -51,9 +56,10 @@ export function CheckoutScreen() {
 
       const initRes = await supabase.functions.invoke("paystack-init", { body });
       if (initRes.error || !initRes.data || !initRes.data.authorization_url) {
-        let msg = "Could not start checkout. Please try again.";
+        let msg = "Checkout could not be started. Please try again.";
         try {
-          const ctx = initRes.error && initRes.error.context && initRes.error.context.json ? await initRes.error.context.json() : null;
+          const ctx = initRes.error && initRes.error.context && initRes.error.context.json
+            ? await initRes.error.context.json() : null;
           if (ctx && ctx.error) msg = ctx.error;
         } catch (_e) {}
         setPaying(false);
@@ -68,7 +74,7 @@ export function CheckoutScreen() {
         setPaying(false);
         return showAlert({
           title: "Still confirming",
-          message: "Your payment is being confirmed and your plan will update shortly. You can check your profile in a moment."
+          message: "Your payment is being confirmed and your plan will update shortly. Check your profile in a moment.",
         });
       }
 
@@ -92,109 +98,115 @@ export function CheckoutScreen() {
   }
 
   const periodLabel = period === "monthly" ? "Monthly" : "Annual";
-  const perLabel = period === "monthly" ? "/mo" : "/yr";
+  const perLabel = period === "monthly" ? " per month" : " per year";
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-          <Text style={[styles.back, { color: colors.accentOn }]}>Back</Text>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Checkout</Text>
-        <View style={{ width: 50 }} />
+        <Text style={styles.headTitle}>Checkout</Text>
+        <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-        <View style={[styles.summary, { backgroundColor: glass.surface, borderColor: glass.stroke, boxShadow: glow.soft } as any]}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.summary}>
           <View style={styles.summaryHead}>
-            <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.planChip, { boxShadow: glow.brand } as any]}>
-              <ShieldCheck size={18} color={colors.accentText} strokeWidth={2} />
-            </LinearGradient>
-            <View>
-              <Text style={[styles.planName, { color: colors.text }]}>{tierName} plan</Text>
-              <Text style={[styles.planPeriod, { color: colors.textMuted }]}>{periodLabel} billing</Text>
+            <View style={styles.planChip}>
+              <ShieldCheck size={18} color={colors.ink} strokeWidth={2} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planName}>{tierName}</Text>
+              <Text style={styles.planPeriod}>{periodLabel} billing</Text>
             </View>
           </View>
 
           <View style={styles.divider} />
 
-          <Row label={`${tierName} (${periodLabel})`} value={naira(price) + perLabel} colors={colors} />
-          <Row label="VAT" value="Included" colors={colors} />
+          <View style={styles.line}>
+            <Text style={styles.lineLabel}>{tierName} ({periodLabel})</Text>
+            <Text style={styles.lineValue}>{naira(price)}{perLabel}</Text>
+          </View>
+          <View style={styles.line}>
+            <Text style={styles.lineLabel}>VAT</Text>
+            <Text style={styles.lineValue}>Included</Text>
+          </View>
+
           <View style={styles.divider} />
-          <View style={styles.totalRow}>
-            <Text style={[styles.totalLabel, { color: colors.text }]}>Total today</Text>
-            <Text style={[styles.totalValue, { color: colors.text }]}>{naira(price)}</Text>
+
+          <View style={styles.line}>
+            <Text style={styles.totalLabel}>Total today</Text>
+            <Text style={styles.totalValue}>{naira(price)}</Text>
           </View>
         </View>
 
-        <Text style={[styles.payWith, { color: colors.textMuted }]}>Payment method</Text>
-        <View style={[styles.methodRow, { backgroundColor: glass.surface, borderColor: colors.accentOn, boxShadow: glow.soft } as any]}>
-          <View style={[styles.methodChip, { backgroundColor: colors.accentOn + "1f", borderColor: colors.accentOn + "44" }]}>
-            <CreditCard size={18} color={colors.accentOn} strokeWidth={2} />
+        <Text style={styles.sectionLabel}>Payment method</Text>
+        <View style={styles.methodRow}>
+          <View style={styles.methodChip}>
+            <CreditCard size={18} color={colors.ink} strokeWidth={2} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.methodName, { color: colors.text }]}>Card / Bank transfer</Text>
-            <Text style={[styles.methodSub, { color: colors.textMuted }]}>Secured by Paystack</Text>
+            <Text style={styles.methodName}>Card or bank transfer</Text>
+            <Text style={styles.methodSub}>Secured by Paystack</Text>
           </View>
         </View>
 
-        <Pressable onPress={pay} disabled={paying}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.payBtn, { boxShadow: glow.brand } as any, paying && { opacity: 0.8 }]}>
-            {paying ? <ActivityIndicator color={colors.accentText} /> : (
-              <Text style={[styles.payText, { color: colors.accentText }]}>Pay {naira(price)}</Text>
-            )}
-          </LinearGradient>
-        </Pressable>
-
-        {paying ? (
-          <Text style={[styles.secureText, { color: colors.textMuted, marginTop: spacing.md }]}>
-            Do not close the app. Confirming your payment...
+        <View style={styles.trustRow}>
+          <Lock size={14} color={colors.textMuted} strokeWidth={2} />
+          <Text style={styles.trustText}>
+            Payment is handled by Paystack. FlagRisk never sees your card details.
           </Text>
-        ) : null}
-
-        <View style={styles.secureRow}>
-          <Lock size={13} color={colors.textMuted} strokeWidth={2} />
-          <Text style={[styles.secureText, { color: colors.textMuted }]}>Card details never touch FlagRisk. Cancel anytime.</Text>
         </View>
       </ScrollView>
+
+      <View style={styles.footer}>
+        <Pressable style={[styles.payBtn, paying && { opacity: 0.8 }]} onPress={pay} disabled={paying}>
+          {paying
+            ? <ActivityIndicator color={colors.accent} />
+            : <Text style={styles.payText}>Pay {naira(price)}</Text>}
+        </Pressable>
+        <Text style={styles.footNote}>You can cancel at any time from Settings.</Text>
+      </View>
     </SafeAreaView>
   );
 }
 
-function Row({ label, value, colors }: any) {
-  return (
-    <View style={styles.row}>
-      <Text style={[styles.rowLabel, { color: colors.textMuted }]}>{label}</Text>
-      <Text style={[styles.rowValue, { color: colors.text }]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  back: { fontSize: 16, fontWeight: "700" },
-  headerTitle: { fontSize: 18, fontWeight: "800" },
-  summary: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg },
-  summaryHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  planChip: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  planName: { fontSize: 18, fontWeight: "800" },
-  planPeriod: { fontSize: 13, marginTop: 2 },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(128,128,128,0.3)", marginVertical: spacing.md },
-  row: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },
-  rowLabel: { fontSize: 14 },
-  rowValue: { fontSize: 14, fontWeight: "600" },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  totalLabel: { fontSize: 16, fontWeight: "800" },
-  totalValue: { fontSize: 22, fontWeight: "900" },
-  payWith: { fontSize: 13, fontWeight: "700", textTransform: "uppercase", marginTop: spacing.xl, marginBottom: spacing.sm },
-  methodRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderRadius: radius.lg, borderWidth: 1.5, padding: spacing.md },
-  methodChip: { width: 36, height: 36, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  methodName: { fontSize: 15, fontWeight: "700" },
-  methodSub: { fontSize: 12, marginTop: 2 },
-  payBtn: { height: 56, borderRadius: radius.md, alignItems: "center", justifyContent: "center", marginTop: spacing.xl },
-  payText: { fontSize: 17, fontWeight: "800" },
-  secureRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.md },
-  secureText: { fontSize: 12, textAlign: "center" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: spacing.lg },
+
+  summary: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md },
+  summaryHead: { flexDirection: "row", alignItems: "center", gap: spacing.ms },
+  planChip: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  planName: { ...type.subheading, color: colors.ink },
+  planPeriod: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
+  line: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4 },
+  lineLabel: { ...type.caption, color: colors.textMuted, flex: 1 },
+  lineValue: { ...type.caption, fontWeight: "600", color: colors.ink },
+  totalLabel: { ...type.label, fontWeight: "600", color: colors.ink },
+  totalValue: { ...type.subheading, color: colors.ink },
+
+  sectionLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginTop: spacing.lg },
+  methodRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    backgroundColor: colors.bg, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.ink, padding: spacing.md,
+  },
+  methodChip: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+  methodName: { ...type.label, fontWeight: "600", color: colors.ink },
+  methodSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
+
+  trustRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: spacing.md },
+  trustText: { flex: 1, ...type.caption, color: colors.textMuted, lineHeight: 17 },
+
+  footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.sm },
+  payBtn: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
+  payText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  footNote: { ...type.caption, color: colors.textMuted, textAlign: "center" },
 });

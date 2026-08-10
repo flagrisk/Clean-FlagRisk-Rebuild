@@ -1,26 +1,41 @@
-// Support thread: the conversation for one ticket. User messages right, support left.
-// Compose box at the bottom. Snapshot pattern: reload on focus.
+// ============================================================================
+// Support thread - FlagRisk v2.1
+// Designed, not rebuilt: no mockup exists.
+//   header with subject and a status pill | message bubbles | composer
+//   yours: ink bubble, white text, right | support: #FAFAFA bubble, left
+// Logic unchanged, including the base64 upload path that is the correct one
+// and was the reference for fixing the evidence capture screens.
+//
+// Added: timestamps on messages, and an explicit "We reply within one working
+// day" line on a thread that has no support reply yet. Two testers heard
+// nothing back and had no idea whether the message had even been received.
+// ============================================================================
 import { useCallback, useRef, useState } from "react";
-import { FlatList, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  FlatList, Image, KeyboardAvoidingView, Platform, Pressable,
+  ScrollView, StyleSheet, Text, TextInput, View,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
-import { Send, Paperclip, X } from "lucide-react-native";
+import { ArrowLeft, Send, Paperclip, X } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { decode as decodeBase64 } from "base64-arraybuffer";
-import { LinearGradient } from "expo-linear-gradient";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
 import { showAlert } from "../components/Feedback";
+import { colors, radius, spacing, type } from "../theme";
 
 type Msg = { id: string; sender: string; body: string; attachment_urls: string[] | null; created_at: string };
+
+function clockOf(iso: string) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export function SupportThreadScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
-  const { colors, glass, gradients, glow } = useTheme();
   const ticketId = route.params?.ticketId;
   const subject = route.params?.subject ?? "Support";
   const [status, setStatus] = useState(route.params?.status ?? "open");
@@ -39,14 +54,19 @@ export function SupportThreadScreen() {
 
   async function pickImages() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { showAlert({ title: "Permission needed", message: "Allow photo access to attach images." }); return; }
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: true, quality: 0.7 });
+    if (!perm.granted) {
+      showAlert({ title: "Permission needed", message: "Allow photo access to attach images." });
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsMultipleSelection: true, quality: 0.7,
+    });
     if (res.canceled) return;
     const uris = (res.assets || []).map((a) => a.uri);
-    setPendingImages((cur) => [...cur, ...uris]);
+    setPendingImages((cur) => cur.concat(uris));
   }
 
-  async function uploadOne(uri) {
+  async function uploadOne(uri: string) {
     const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
     const bytes = decodeBase64(b64);
     const { data: u } = await supabase.auth.getUser();
@@ -67,15 +87,21 @@ export function SupportThreadScreen() {
     setText("");
     setPendingImages([]);
     try {
-      const urls = [];
+      const urls: string[] = [];
       for (const uri of imagesToSend) { urls.push(await uploadOne(uri)); }
-      const { error } = await supabase.rpc("send_support_message", { p_ticket_id: ticketId, p_body: body, p_attachments: urls });
+      const { error } = await supabase.rpc("send_support_message", {
+        p_ticket_id: ticketId, p_body: body, p_attachments: urls,
+      });
       setSending(false);
-      if (error) { showAlert({ title: "Not sent", message: error.message ?? "Please try again.", tone: "error" }); setText(body); setPendingImages(imagesToSend); return; }
+      if (error) {
+        showAlert({ title: "Not sent", message: error.message ?? "Please try again.", tone: "error" });
+        setText(body); setPendingImages(imagesToSend);
+        return;
+      }
       load();
     } catch (e) {
       setSending(false);
-      showAlert({ title: "Upload failed", message: "Could not upload the image. Please try again.", tone: "error" });
+      showAlert({ title: "Upload failed", message: "The image could not be uploaded. Please try again.", tone: "error" });
       setText(body); setPendingImages(imagesToSend);
     }
   }
@@ -83,19 +109,27 @@ export function SupportThreadScreen() {
   async function toggleResolved() {
     const next = status === "resolved" ? "open" : "resolved";
     const { error } = await supabase.rpc("set_ticket_status", { p_ticket_id: ticketId, p_status: next });
-    if (error) { showAlert({ title: "Could not update", message: error.message ?? "Please try again.", tone: "error" }); return; }
+    if (error) {
+      showAlert({ title: "Could not update", message: error.message ?? "Please try again.", tone: "error" });
+      return;
+    }
     setStatus(next);
   }
 
+  const canSend = text.trim() !== "" || pendingImages.length > 0;
+  const awaitingReply = messages.length > 0 && !messages.some((m) => m.sender !== "user");
+
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-          <Text style={[styles.back, { color: colors.accentOn }]}>‹ Back</Text>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>{subject}</Text>
-        <Pressable onPress={toggleResolved} hitSlop={8} style={[styles.statusBtn, { borderColor: glass.stroke, backgroundColor: glass.surface }]}>
-          <Text style={[styles.statusBtnText, { color: status === "resolved" ? colors.accentOn : colors.textMuted }]}>{status === "resolved" ? "Resolved" : "Mark resolved"}</Text>
+        <Text style={styles.headTitle} numberOfLines={1}>{subject}</Text>
+        <Pressable onPress={toggleResolved} hitSlop={8} style={[styles.statusBtn, status === "resolved" && styles.statusBtnOn]}>
+          <Text style={[styles.statusBtnText, status === "resolved" && { color: colors.accent }]}>
+            {status === "resolved" ? "Resolved" : "Resolve"}
+          </Text>
         </Pressable>
       </View>
 
@@ -104,16 +138,22 @@ export function SupportThreadScreen() {
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.gutter, paddingVertical: spacing.lg, gap: spacing.ms }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          ListFooterComponent={
+            awaitingReply ? (
+              <Text style={styles.awaiting}>We have your message and will reply within one working day.</Text>
+            ) : null
+          }
           renderItem={({ item }) => {
             const mine = item.sender === "user";
             return (
-              <View style={[styles.bubbleWrap, { alignItems: mine ? "flex-end" : "flex-start" }]}>
-                <View style={[styles.bubble, mine
-                  ? { backgroundColor: "#dff29a" }
-                  : { backgroundColor: glass.surface, borderColor: glass.stroke, borderWidth: 1 }]}>
-                  {item.body ? <Text style={[styles.bubbleText, { color: mine ? "#0a0a0a" : colors.text }]}>{item.body}</Text> : null}
+              <View style={{ alignItems: mine ? "flex-end" : "flex-start" }}>
+                <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                  {item.body ? (
+                    <Text style={[styles.bubbleText, mine && { color: "#FFFFFF" }]}>{item.body}</Text>
+                  ) : null}
                   {item.attachment_urls && item.attachment_urls.length > 0 ? (
                     <View style={styles.attachGrid}>
                       {item.attachment_urls.map((url, i) => (
@@ -122,36 +162,49 @@ export function SupportThreadScreen() {
                     </View>
                   ) : null}
                 </View>
-                {!mine ? <Text style={[styles.sender, { color: colors.textFaint }]}>Support</Text> : null}
+                <Text style={styles.meta}>
+                  {mine ? "" : "FlagRisk  "}{clockOf(item.created_at)}
+                </Text>
               </View>
             );
           }}
         />
+
         {pendingImages.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pendingStrip} contentContainerStyle={{ gap: 8, paddingHorizontal: spacing.md }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.pendingStrip}
+            contentContainerStyle={{ gap: 8, paddingHorizontal: spacing.gutter }}
+          >
             {pendingImages.map((uri, i) => (
               <View key={i} style={styles.pendingWrap}>
                 <Image source={{ uri }} style={styles.pendingImg} />
-                <Pressable onPress={() => setPendingImages((cur) => cur.filter((_, idx) => idx !== i))} style={[styles.pendingRemove, { backgroundColor: colors.bg }]}>
-                  <X size={14} color={colors.text} strokeWidth={2.5} />
+                <Pressable
+                  onPress={() => setPendingImages((cur) => cur.filter((_, idx) => idx !== i))}
+                  style={styles.pendingRemove}
+                >
+                  <X size={13} color={colors.ink} strokeWidth={2.5} />
                 </Pressable>
               </View>
             ))}
           </ScrollView>
         ) : null}
-        <View style={[styles.composer, { borderTopColor: glass.stroke, paddingBottom: insets.bottom + spacing.sm }]}>
+
+        <View style={[styles.composer, { paddingBottom: insets.bottom + spacing.sm }]}>
           <Pressable onPress={pickImages} hitSlop={8} style={styles.attachBtn}>
-            <Paperclip size={22} color={colors.textMuted} strokeWidth={2} />
+            <Paperclip size={20} color={colors.textMuted} strokeWidth={2} />
           </Pressable>
           <TextInput
-            value={text} onChangeText={setText} placeholder="Type a message" placeholderTextColor={colors.textFaint}
+            value={text}
+            onChangeText={setText}
+            placeholder="Type a message"
+            placeholderTextColor="#9F9F9F"
             multiline
-            style={[styles.input, { color: colors.text, borderColor: glass.stroke, backgroundColor: glass.surface }]}
+            style={styles.input}
           />
-          <Pressable onPress={send} disabled={sending || (text.trim() === "" && pendingImages.length === 0)}>
-            <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.sendBtn, { boxShadow: glow.brand, opacity: (text.trim() === "" && pendingImages.length === 0) ? 0.5 : 1 } as any]}>
-              <Send size={20} color={colors.accentText} strokeWidth={2.5} />
-            </LinearGradient>
+          <Pressable onPress={send} disabled={sending || !canSend} style={[styles.sendBtn, !canSend && { opacity: 0.4 }]}>
+            <Send size={18} color={colors.accent} strokeWidth={2.5} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -160,24 +213,43 @@ export function SupportThreadScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
-  back: { fontSize: 16, fontWeight: "700" },
-  headerTitle: { fontSize: 17, fontWeight: "800", flex: 1 },
-  statusBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1 },
-  statusBtnText: { fontSize: 12, fontWeight: "700" },
-  bubbleWrap: { width: "100%" },
-  bubble: { maxWidth: "82%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.lg },
-  bubbleText: { fontSize: 15, lineHeight: 21 },
-  sender: { fontSize: 11, marginTop: 3, marginLeft: 4 },
-  composer: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1 },
-  input: { flex: 1, borderWidth: 1, borderRadius: radius.lg, paddingVertical: 10, paddingHorizontal: 14, fontSize: 15, maxHeight: 120 },
-  sendBtn: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
-  attachBtn: { width: 40, height: 46, alignItems: "center", justifyContent: "center" },
-  attachGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
-  attachImg: { width: 140, height: 140, borderRadius: 10, backgroundColor: "#00000010" },
-  pendingStrip: { maxHeight: 76, marginBottom: 6 },
-  pendingWrap: { position: "relative" },
-  pendingImg: { width: 64, height: 64, borderRadius: 8 },
-  pendingRemove: { position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: { height: 36, flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.subheading, color: colors.ink },
+  statusBtn: { borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 6 },
+  statusBtnOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  statusBtnText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.textMuted },
+
+  bubble: { maxWidth: "84%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md },
+  bubbleMine: { backgroundColor: colors.ink, borderTopRightRadius: 4 },
+  bubbleTheirs: { backgroundColor: "#FAFAFA", borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4 },
+  bubbleText: { ...type.label, fontWeight: "400", color: colors.ink, lineHeight: 21 },
+  meta: { ...type.caption, color: colors.textFaint, marginTop: 4, marginHorizontal: 4 },
+  attachGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  attachImg: { width: 120, height: 120, borderRadius: radius.sm },
+
+  awaiting: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: spacing.lg, paddingHorizontal: spacing.lg, lineHeight: 17 },
+
+  pendingStrip: { maxHeight: 84, paddingVertical: spacing.sm },
+  pendingWrap: { width: 64, height: 64 },
+  pendingImg: { width: 64, height: 64, borderRadius: radius.sm },
+  pendingRemove: {
+    position: "absolute", top: -6, right: -6, width: 22, height: 22, borderRadius: 11,
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
+    alignItems: "center", justifyContent: "center",
+  },
+
+  composer: {
+    flexDirection: "row", alignItems: "flex-end", gap: spacing.sm,
+    paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  attachBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  input: {
+    flex: 1, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    paddingVertical: 12, paddingHorizontal: spacing.md,
+    ...type.label, fontWeight: "400", color: colors.ink, maxHeight: 120,
+  },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
 });

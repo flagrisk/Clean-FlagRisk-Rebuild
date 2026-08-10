@@ -1,32 +1,33 @@
-﻿// Payment History (V2). Reads real payments joined to their subscription tier/interval.
+// ============================================================================
+// Payment history - FlagRisk v2.1
+// Designed, not rebuilt: no mockup exists for commerce.
+//   header | rows: 40pt receipt tile, plan and period, date, amount + status pill
+// Data logic unchanged: payments joined to subscriptions on provider_ref.
+// ============================================================================
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Receipt } from "lucide-react-native";
+import { ArrowLeft, Receipt } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { colors, radius, spacing, type, screenBottomPad } from "../theme";
 
-function naira(n: number, ccy: string) { return (ccy || "NGN") + " " + Number(n || 0).toLocaleString(); }
+function money(n: number, ccy: string) { return (ccy || "NGN") + " " + Number(n || 0).toLocaleString(); }
 function cap(s: string) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
 function fmtDate(iso: string) {
   if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
-function statusLabel(s: string) {
-  if (s === "succeeded") return "Paid";
-  if (s === "refunded") return "Refunded";
-  if (s === "failed") return "Failed";
-  if (s === "pending") return "Pending";
-  return cap(s || "");
+function statusMeta(s: string) {
+  if (s === "succeeded") return { label: "Paid", fg: "#1C9D6B", bg: "#D2F0E3" };
+  if (s === "refunded") return { label: "Refunded", fg: "#B26A12", bg: "#FDE7CF" };
+  if (s === "failed") return { label: "Failed", fg: colors.riskHigh, bg: "#FBD1CF" };
+  if (s === "pending") return { label: "Pending", fg: colors.textMuted, bg: "#EBEBEB" };
+  return { label: cap(s || ""), fg: colors.textMuted, bg: "#EBEBEB" };
 }
 
 export function PaymentHistoryScreen() {
   const navigation = useNavigation<any>();
-  const { colors, glass, gradients, glow } = useTheme();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,7 +43,7 @@ export function PaymentHistoryScreen() {
       .order("paid_at", { ascending: false });
     const rows = pays || [];
     const refs = rows.map((r: any) => r.provider_ref).filter(Boolean);
-    let subMap: any = {};
+    const subMap: any = {};
     if (refs.length) {
       const { data: subs } = await supabase
         .from("subscriptions")
@@ -50,7 +51,7 @@ export function PaymentHistoryScreen() {
         .in("provider_ref", refs);
       (subs || []).forEach((s: any) => { subMap[s.provider_ref] = s; });
     }
-    const merged = rows.map((r: any) => {
+    setItems(rows.map((r: any) => {
       const s = subMap[r.provider_ref] || {};
       return {
         id: r.id,
@@ -61,75 +62,82 @@ export function PaymentHistoryScreen() {
         plan: s.tier ? cap(s.tier) : "Coverage",
         period: s.billing_interval ? cap(s.billing_interval) : "",
       };
-    });
-    setItems(merged);
+    }));
     setLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={12}>
-          <Text style={[styles.back, { color: colors.accentOn }]}>Back</Text>
+        <Pressable onPress={() => navigation.goBack()} style={styles.headBtnPlain} hitSlop={8}>
+          <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Payment History</Text>
-        <View style={{ width: 50 }} />
+        <Text style={styles.headTitle}>Payment history</Text>
+        <View style={{ width: 36 }} />
       </View>
 
       {loading ? (
-        <View style={styles.empty}><ActivityIndicator color={colors.accentOn} /></View>
+        <ActivityIndicator color={colors.ink} style={{ marginTop: 40 }} />
       ) : items.length === 0 ? (
         <View style={styles.empty}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={[styles.emptyChip, { boxShadow: glow.brand } as any]}>
-            <Receipt size={30} color={colors.accentText} strokeWidth={2} />
-          </LinearGradient>
-          <Text style={[styles.emptyText, { color: colors.text }]}>No payments yet.</Text>
-          <Text style={[styles.emptySub, { color: colors.textMuted }]}>Your receipts will appear here after you upgrade.</Text>
+          <Receipt size={34} color={colors.textFaint} strokeWidth={1.8} />
+          <Text style={styles.emptyTitle}>No payments yet</Text>
+          <Text style={styles.emptySub}>Receipts for your plan and any coverage add-ons will appear here.</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
-          {items.map((t) => (
-            <View key={t.id} style={[styles.row, { backgroundColor: glass.surface, borderColor: glass.stroke, boxShadow: glow.soft } as any]}>
-              <View style={[styles.rowChip, { backgroundColor: colors.accentOn + "1f", borderColor: colors.accentOn + "44" }]}>
-                <Receipt size={18} color={colors.accentOn} strokeWidth={2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.plan, { color: colors.text }]}>{t.period ? t.plan + " - " + t.period : t.plan}</Text>
-                <Text style={[styles.date, { color: colors.textMuted }]}>{t.date}</Text>
-              </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={[styles.amount, { color: colors.text }]}>{naira(t.amount, t.currency)}</Text>
-                <View style={[styles.badge, { backgroundColor: colors.safe + "22", borderColor: colors.safe }]}>
-                  <Text style={[styles.badgeText, { color: colors.safe }]}>{statusLabel(t.status)}</Text>
+        <FlatList
+          data={items}
+          keyExtractor={(r) => r.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: screenBottomPad }}
+          renderItem={({ item }) => {
+            const st = statusMeta(item.status);
+            return (
+              <View style={styles.row}>
+                <View style={styles.tile}>
+                  <Receipt size={18} color={colors.ink} strokeWidth={2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.plan} numberOfLines={1}>
+                    {item.plan}{item.period ? ", " + item.period : ""}
+                  </Text>
+                  <Text style={styles.date}>{item.date}</Text>
+                </View>
+                <View style={{ alignItems: "flex-end", gap: 5 }}>
+                  <Text style={styles.amount}>{money(item.amount, item.currency)}</Text>
+                  <View style={[styles.pill, { backgroundColor: st.bg }]}>
+                    <Text style={[styles.pillText, { color: st.fg }]}>{st.label}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          ))}
-          <Text style={[styles.foot, { color: colors.textMuted }]}>Showing recent transactions.</Text>
-        </ScrollView>
+            );
+          }}
+        />
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  back: { fontSize: 16, fontWeight: "700" },
-  headerTitle: { fontSize: 18, fontWeight: "800" },
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
-  emptyChip: { width: 64, height: 64, borderRadius: 20, alignItems: "center", justifyContent: "center", marginBottom: spacing.md },
-  emptyText: { fontSize: 16, fontWeight: "700" },
-  emptySub: { fontSize: 14, marginTop: 4, textAlign: "center" },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderWidth: 1, borderRadius: radius.lg, padding: spacing.md },
-  rowChip: { width: 36, height: 36, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  plan: { fontSize: 15, fontWeight: "700" },
-  date: { fontSize: 13, marginTop: 2 },
-  amount: { fontSize: 15, fontWeight: "800" },
-  badge: { borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, marginTop: 4 },
-  badgeText: { fontSize: 11, fontWeight: "700" },
-  foot: { fontSize: 12, textAlign: "center", marginTop: spacing.md },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  row: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  tile: { width: 40, height: 40, borderRadius: radius.sm, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+  plan: { ...type.label, fontWeight: "600", color: colors.ink },
+  date: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  amount: { ...type.label, fontWeight: "600", color: colors.ink },
+  pill: { borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  pillText: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
+
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
+  emptyTitle: { ...type.subheading, color: colors.ink },
+  emptySub: { ...type.caption, color: colors.textMuted, textAlign: "center", lineHeight: 18 },
 });

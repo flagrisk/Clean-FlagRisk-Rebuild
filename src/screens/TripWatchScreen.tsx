@@ -1,71 +1,72 @@
-﻿// Trip Watch: automatic background check-ins during a journey (Pro and higher).
-// Free users keep the existing manual check-in; this is the scheduled version.
-// This screen drives the trip lifecycle (start / view active / stop). The actual
-// background scheduling and arrival detection are wired separately.
+// ============================================================================
+// Trip Watch - FlagRisk v2.1
+// Rebuilt against Figma "Trip Watch" (12.0 flow, nodes 75:2591 / 2665 / 2758 /
+// 2831 / 2932).
+//   setup: map + "Trip Details" sheet -> "Review Summary" -> Start
+//   active: map + status card + Emergency / Check-In pair + End Session
+//   end:    confirmation sheet
+//
+// DESIGN ONLY. Every behaviour and input is unchanged: interval, duration,
+// recipients, destination pin, background task, escalation, manual check-in.
+//
+// Two things drawn in the mockup are NOT built, because they do not exist:
+//  - Departure Time. Ruled out explicitly.
+//  - Purpose. start_trip takes no such parameter.
+// And the active state is worded as interval check-ins, not "Sharing Live
+// Location", because the app checks in on a cadence, it does not stream.
+// ============================================================================
 import { useCallback, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, View, Pressable } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
-import { ChevronLeft, Check, MapPin, Clock, Users, ShieldCheck, Square } from "lucide-react-native";
+import * as Location from "expo-location";
+import {
+  ArrowLeft, MapPin, Clock, Users, Check, Siren, X, ChevronRight,
+} from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
 import { showAlert } from "../components/Feedback";
 import { Avatar } from "../components/Avatar";
-import * as Location from "expo-location";
 import { TRIP_TASK } from "../tasks/tripTask";
+import { colors, radius, spacing, type, elevation } from "../theme";
 
-type Member = { member_id: string; display_name: string | null };
+type Member = { member_id: string; display_name: string | null; avatar_url?: string | null };
 type Trip = {
-  id: string;
-  status: string;
-  interval_minutes: number;
-  recipient_ids: string[];
-  started_at: string;
-  last_check_in_at: string | null;
-  planned_end_at: string | null;
+  id: string; status: string; interval_minutes: number; recipient_ids: string[];
+  started_at: string; last_check_in_at: string | null; planned_end_at: string | null;
 };
-
-const AVATAR_COLORS = ["#e0457b", "#3ec46a", "#5b6cf0", "#e0a045", "#9c45e0"];
-function avatarColor(id: string) { let h = 0; for (const c of id) h = (h + c.charCodeAt(0)) % AVATAR_COLORS.length; return AVATAR_COLORS[h]; }
-function initials(name: string | null) { if (!name) return "?"; return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(); }
+type Dest = { lat: number; lng: number };
 
 const INTERVALS = [10, 15, 30, 60];
-const DURATIONS = [
-  { label: "None", hours: null },
+const DURATIONS: { label: string; hours: number | null }[] = [
+  { label: "Open", hours: null },
   { label: "1h", hours: 1 },
   { label: "2h", hours: 2 },
   { label: "4h", hours: 4 },
   { label: "8h", hours: 8 },
 ];
-const INITIAL_DELTA = { latitudeDelta: 0.02, longitudeDelta: 0.02 };
+const DELTA = { latitudeDelta: 0.02, longitudeDelta: 0.02 };
 const DEFAULT_REGION = { latitude: 9.0765, longitude: 7.3986 };
 
 export function TripWatchScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  const { colors, glass, gradients, glow, mode } = useTheme();
 
   const [loading, setLoading] = useState(true);
   const [isPro, setIsPro] = useState(false);
-  const [active, setActive] = useState(null);
-
-  const [members, setMembers] = useState([]);
-  const [selected, setSelected] = useState([]);
+  const [active, setActive] = useState<Trip | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [interval, setIntervalMin] = useState(15);
-  const [intervalCustomOn, setIntervalCustomOn] = useState(false);
+  const [customIntervalOn, setCustomIntervalOn] = useState(false);
   const [customInterval, setCustomInterval] = useState("");
-  const [durationHours, setDurationHours] = useState(null);
-  const [customOn, setCustomOn] = useState(false);
-  const [customHours, setCustomHours] = useState("");
-  const [customMins, setCustomMins] = useState("");
-  const [dest, setDest] = useState(null);
+  const [durationHours, setDurationHours] = useState<number | null>(null);
+  const [dest, setDest] = useState<Dest | null>(null);
+  const [step, setStep] = useState<"details" | "review">("details");
   const [starting, setStarting] = useState(false);
   const [checking, setChecking] = useState(false);
-  const mapRef = useRef(null);
+  const [ending, setEnding] = useState(false);
+  const mapRef = useRef<MapView | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,8 +74,7 @@ export function TripWatchScreen() {
     const id = u.user?.id;
     if (!id) { setLoading(false); return; }
     const { data: prof } = await supabase.from("profiles").select("current_tier").eq("id", id).single();
-    const pro = prof?.current_tier === "pro" || prof?.current_tier === "premium";
-    setIsPro(pro);
+    setIsPro(prof?.current_tier === "pro" || prof?.current_tier === "premium");
     const { data: trips } = await supabase
       .from("trips")
       .select("id, status, interval_minutes, recipient_ids, started_at, last_check_in_at, planned_end_at")
@@ -82,34 +82,26 @@ export function TripWatchScreen() {
       .in("status", ["active", "overdue", "escalated"])
       .order("started_at", { ascending: false })
       .limit(1);
-    setActive(trips && trips.length > 0 ? trips[0] : null);
+    setActive(trips && trips.length > 0 ? (trips[0] as Trip) : null);
     const { data: mem } = await supabase.rpc("my_network_members", { p_owner: id });
-    if (mem) setMembers(mem.map((m) => ({ member_id: m.member_id, display_name: m.display_name, avatar_url: m.avatar_url })));
+    if (mem) setMembers((mem as any[]).map((m) => ({
+      member_id: m.member_id, display_name: m.display_name, avatar_url: m.avatar_url,
+    })));
     setLoading(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function toggle(id) {
-    setSelected((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  function toggle(id: string) {
+    setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.concat([id])));
   }
 
   function computeEndAt() {
-    let hrs = durationHours;
-    if (customOn) {
-      const h = parseInt(customHours || "0", 10);
-      const m = parseInt(customMins || "0", 10);
-      const total = h + m / 60;
-      if (total <= 0) return null;
-      hrs = total;
-    }
-    if (hrs == null || hrs <= 0) return null;
-    return new Date(Date.now() + hrs * 3600 * 1000).toISOString();
+    if (durationHours == null || durationHours <= 0) return null;
+    return new Date(Date.now() + durationHours * 3600 * 1000).toISOString();
   }
 
-
-  async function startTripTracking(intervalMin) {
-    // Foreground permission first, then background ("always").
+  async function startTripTracking(intervalMin: number) {
     const fg = await Location.requestForegroundPermissionsAsync();
     if (fg.status !== "granted") return false;
     const bg = await Location.requestBackgroundPermissionsAsync();
@@ -118,8 +110,6 @@ export function TripWatchScreen() {
     if (already) await Location.stopLocationUpdatesAsync(TRIP_TASK).catch(() => {});
     await Location.startLocationUpdatesAsync(TRIP_TASK, {
       accuracy: Location.Accuracy.Balanced,
-      // Ask the OS to wake us around a third of the interval so an actual
-      // check-in lands near the chosen cadence (timing is best-effort).
       timeInterval: Math.max(60000, Math.round((intervalMin * 60 * 1000) / 3)),
       distanceInterval: 0,
       pausesUpdatesAutomatically: false,
@@ -139,7 +129,7 @@ export function TripWatchScreen() {
   async function startTrip() {
     if (starting) return;
     let useInterval = interval;
-    if (intervalCustomOn) {
+    if (customIntervalOn) {
       const ci = parseInt(customInterval || "0", 10);
       if (isNaN(ci) || ci < 5 || ci > 180) {
         showAlert({ title: "Check the interval", message: "Enter a check-in interval between 5 and 180 minutes." });
@@ -149,19 +139,25 @@ export function TripWatchScreen() {
     }
     setStarting(true);
     try {
-      const endAt = computeEndAt();
-      const { data, error } = await supabase.rpc("start_trip", {
+      const { error } = await supabase.rpc("start_trip", {
         p_interval_minutes: useInterval,
         p_recipient_ids: selected,
-        p_planned_end_at: endAt,
+        p_planned_end_at: computeEndAt(),
         p_destination_lat: dest ? dest.lat : null,
         p_destination_lng: dest ? dest.lng : null,
         p_arrival_radius_m: dest ? 150 : null,
       });
       setStarting(false);
       if (error) {
-        if (error.message && error.message.includes("Trip Watch requires Pro")) {
-          showAlert({ title: "Pro feature", message: "Trip Watch is available on Pro and higher. Upgrade to schedule automatic check-ins.", buttons: [{ text: "Not now", style: "cancel" }, { text: "See plans", onPress: () => navigation.navigate("PlanPricing") }] });
+        if (error.message && error.message.indexOf("Trip Watch requires Pro") >= 0) {
+          showAlert({
+            title: "Pro feature",
+            message: "Trip Watch is available on Pro and higher. Upgrade to schedule automatic check-ins.",
+            buttons: [
+              { text: "Not now", style: "cancel" },
+              { text: "See plans", onPress: () => navigation.navigate("PlanPricing") },
+            ],
+          });
           return;
         }
         showAlert({ title: "Could not start", message: error.message ?? "Please try again.", tone: "error" });
@@ -169,10 +165,20 @@ export function TripWatchScreen() {
       }
       const tracking = await startTripTracking(useInterval);
       if (!tracking) {
-        showAlert({ title: "Background location needed", message: "Trip Watch needs location access set to Allow all the time to check you in automatically. You can still check in manually from the map.", tone: "error" });
+        showAlert({
+          title: "Background location needed",
+          message: "Trip Watch needs location access set to Allow all the time to check you in automatically. You can still check in manually.",
+          tone: "error",
+        });
       } else {
-        showAlert({ title: "Trip started", message: selected.length > 0 ? (selected.length + (selected.length === 1 ? " person has" : " people have") + " been told your trip has begun.") : "Your trip is running." });
+        showAlert({
+          title: "Trip started",
+          message: selected.length > 0
+            ? selected.length + (selected.length === 1 ? " person has" : " people have") + " been told your trip has begun."
+            : "Your trip is running.",
+        });
       }
+      setStep("details");
       load();
     } catch (e) {
       setStarting(false);
@@ -184,10 +190,8 @@ export function TripWatchScreen() {
     if (!active || checking) return;
     setChecking(true);
     try {
-      let lat = null; let lng = null;
+      let lat: number | null = null; let lng: number | null = null;
       const fg = await Location.getForegroundPermissionsAsync();
-      // Try last-known first (instant), so the check-in is fast. Fall back to a
-      // fresh fix only if there is no cached position.
       if (fg.status === "granted") {
         const last = await Location.getLastKnownPositionAsync().catch(() => null);
         if (last) { lat = last.coords.latitude; lng = last.coords.longitude; }
@@ -198,16 +202,20 @@ export function TripWatchScreen() {
       }
       if (lat == null || lng == null) {
         setChecking(false);
-        showAlert({ title: "Location needed", message: "We could not get your location to check in. Please try again where location is available.", tone: "error" });
+        showAlert({ title: "Location needed", message: "Your location could not be read. Please try again where location is available.", tone: "error" });
         return;
       }
       const wasEscalated = active.status === "escalated";
       const { error } = await supabase.rpc("send_trip_check_in", {
         p_trip_id: active.id, p_lat: lat, p_lng: lng, p_recorded_at: new Date().toISOString(),
       });
-      if (error) { setChecking(false); showAlert({ title: "Could not check in", message: error.message, tone: "error" }); return; }
       setChecking(false);
-      showAlert({ title: "Checked in", message: wasEscalated ? "Your circle has been told you are safe." : "You are safe. Your circle will not be alarmed.", tone: "success" });
+      if (error) { showAlert({ title: "Could not check in", message: error.message, tone: "error" }); return; }
+      showAlert({
+        title: "Checked in",
+        message: wasEscalated ? "Your circle has been told you are safe." : "You are safe. Your circle will not be alarmed.",
+        tone: "success",
+      });
       load();
     } catch (e) {
       setChecking(false);
@@ -215,256 +223,366 @@ export function TripWatchScreen() {
     }
   }
 
-  async function stopTrip() {
+  function stopTrip() {
     if (!active) return;
     showAlert({
-      title: "Stop this trip?",
-      message: "Automatic check-ins will end and your selected people will be told your trip has ended.",
+      title: "End Trip Watch?",
+      message: "Automatic check-ins will stop and your contacts will no longer receive updates.",
       buttons: [
         { text: "Keep going", style: "cancel" },
-        { text: "Stop trip", onPress: async () => {
-          const { error } = await supabase.rpc("end_trip", { p_trip_id: active.id, p_reason: "stopped" });
-          if (error) { showAlert({ title: "Could not stop", message: error.message ?? "Please try again.", tone: "error" }); return; }
-          await stopTripTracking();
-          load();
-        } },
+        {
+          text: "End watch",
+          onPress: async () => {
+            setEnding(true);
+            const { error } = await supabase.rpc("end_trip", { p_trip_id: active.id, p_reason: "stopped" });
+            setEnding(false);
+            if (error) { showAlert({ title: "Could not stop", message: error.message ?? "Please try again.", tone: "error" }); return; }
+            await stopTripTracking();
+            load();
+          },
+        },
       ],
     });
   }
 
-  const Header = (
+  const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
     <View style={styles.header}>
-      <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={{ flexDirection: "row", alignItems: "center" }}>
-        <ChevronLeft size={22} color={colors.text} strokeWidth={2} />
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Trip Watch</Text>
+      <Pressable onPress={onBack} style={styles.headBtnPlain} hitSlop={8}>
+        <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
       </Pressable>
+      <Text style={styles.headTitle}>{title}</Text>
+      <View style={{ width: 36 }} />
+    </View>
+  );
+
+  const Map = ({ marker }: { marker: Dest | null }) => (
+    <View style={styles.mapWrap}>
+      <MapView
+        ref={(r) => { mapRef.current = r; }}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFill}
+        initialRegion={{ ...DEFAULT_REGION, ...DELTA }}
+        showsUserLocation
+        onPress={(e) => !active && setDest({ lat: e.nativeEvent.coordinate.latitude, lng: e.nativeEvent.coordinate.longitude })}
+      >
+        {marker ? (
+          <Marker coordinate={{ latitude: marker.lat, longitude: marker.lng }} anchor={{ x: 0.5, y: 1 }}>
+            <MapPin size={34} color={colors.riskHigh} fill={colors.riskHigh} strokeWidth={1.5} />
+          </Marker>
+        ) : null}
+      </MapView>
     </View>
   );
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-        {Header}
-        <Text style={[styles.muted, { color: colors.textMuted, padding: spacing.lg }]}>Loading...</Text>
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <Header title="Trip Watch" onBack={() => navigation.goBack()} />
+        <ActivityIndicator color={colors.ink} style={{ marginTop: 40 }} />
       </SafeAreaView>
     );
   }
 
-  if (!isPro && !active) {
+  // ---------------------------------------------------------------- ACTIVE --
+  if (active) {
+    const overdue = active.status === "overdue" || active.status === "escalated";
+    const last = active.last_check_in_at ? new Date(active.last_check_in_at) : new Date(active.started_at);
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-        {Header}
-        <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          <View style={[styles.card, { backgroundColor: glass.surface, borderColor: glass.stroke }]}>
-            <ShieldCheck size={28} color={colors.accentOn} strokeWidth={2} />
-            <Text style={[styles.cardTitle, { color: colors.text, marginTop: spacing.sm }]}>Automatic check-ins on your journey</Text>
-            <Text style={[styles.cardBody, { color: colors.textMuted }]}>
-              Trip Watch shares your location with the people you choose, on a schedule you set, until you arrive or stop it. It runs in the background so you do not have to remember. Available on Pro and higher.
-            </Text>
-            <Pressable style={{ marginTop: spacing.md }} onPress={() => navigation.navigate("PlanPricing")}>
-              <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.primaryBtn, { boxShadow: glow.brand }]}>
-                <Text style={[styles.primaryText, { color: colors.accentText }]}>See plans</Text>
-              </LinearGradient>
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <Header title="Trip Watch" onBack={() => navigation.goBack()} />
+        <Map marker={dest} />
+
+        <View style={styles.sheet}>
+          <View style={styles.sheetGrab} />
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>Trip Watch</Text>
+            <Pressable onPress={stopTrip} hitSlop={8} disabled={ending}>
+              <Text style={styles.endLink}>End session</Text>
             </Pressable>
           </View>
-          <Text style={[styles.muted, { color: colors.textFaint, marginTop: spacing.md, textAlign: "center" }]}>
-            You can still check in manually any time from the map.
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
 
-  if (active) {
-    const started = new Date(active.started_at);
-    const last = active.last_check_in_at ? new Date(active.last_check_in_at) : null;
-    return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-        {Header}
-        <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {(active.status === "overdue" || active.status === "escalated") ? (
-            <View style={[styles.safeBanner, { borderColor: active.status === "escalated" ? colors.danger : "#c98a00", backgroundColor: (active.status === "escalated" ? colors.danger : "#c98a00") + "14" }]}>
-              <Text style={[styles.safeBannerTitle, { color: active.status === "escalated" ? colors.danger : "#c98a00" }]}>
+          {overdue ? (
+            <View style={styles.warnCard}>
+              <Text style={styles.warnTitle}>
                 {active.status === "escalated" ? "Your circle has been alerted" : "We have not heard from you"}
               </Text>
-              <Text style={[styles.safeBannerBody, { color: colors.text }]}>
+              <Text style={styles.warnBody}>
                 {active.status === "escalated"
-                  ? "We lost contact and told your circle. Check in to let them know you are safe."
-                  : "Check in to confirm you are safe and stop your circle being alerted."}
+                  ? "Check in to tell everyone you are safe."
+                  : "Check in now, or your circle will be alerted shortly."}
               </Text>
-              <Pressable onPress={confirmSafe} disabled={checking} style={{ marginTop: spacing.sm }}>
-                <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.safeBtn, checking && { opacity: 0.7 }]}>
-                  <ShieldCheck size={18} color={colors.accentText} strokeWidth={2.5} />
-                  <Text style={[styles.safeBtnText, { color: colors.accentText }]}>{checking ? "Checking in..." : "I am safe, check in"}</Text>
-                </LinearGradient>
-              </Pressable>
             </View>
           ) : null}
-          <View style={[styles.card, { backgroundColor: glass.surface, borderColor: colors.accentOn }]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={[styles.pulse, { backgroundColor: colors.accentOn }]} />
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Trip in progress</Text>
-            </View>
-            <View style={styles.rowLine}>
-              <Clock size={16} color={colors.textMuted} strokeWidth={2} />
-              <Text style={[styles.rowText, { color: colors.textMuted }]}>Checking in every {active.interval_minutes} minutes</Text>
-            </View>
-            <View style={styles.rowLine}>
-              <Users size={16} color={colors.textMuted} strokeWidth={2} />
-              <Text style={[styles.rowText, { color: colors.textMuted }]}>{active.recipient_ids.length} {active.recipient_ids.length === 1 ? "person" : "people"} notified</Text>
-            </View>
-            <Text style={[styles.muted, { color: colors.textFaint, marginTop: spacing.xs }]}>Started {started.toLocaleTimeString()}</Text>
-            <Text style={[styles.muted, { color: colors.textFaint }]}>Last check-in {last ? last.toLocaleTimeString() : "pending"}</Text>
-            {active.planned_end_at ? (
-              <Text style={[styles.muted, { color: colors.textFaint }]}>Ends automatically {new Date(active.planned_end_at).toLocaleTimeString()}</Text>
-            ) : null}
+
+          <View style={styles.statusRow}>
+            <View style={styles.statusIcon}><Clock size={17} color={colors.ink} strokeWidth={2} /></View>
+            <Text style={styles.statusText}>Checking in every {active.interval_minutes} minutes</Text>
           </View>
-          <Pressable style={{ marginTop: spacing.lg }} onPress={stopTrip}>
-            <View style={[styles.stopBtn, { borderColor: colors.danger, backgroundColor: colors.danger + "12" }]}>
-              <Square size={18} color={colors.danger} strokeWidth={2.5} />
-              <Text style={[styles.stopText, { color: colors.danger }]}>Stop trip</Text>
-            </View>
-          </Pressable>
-        </ScrollView>
+          <View style={styles.statusRow}>
+            <View style={styles.statusIcon}><Users size={17} color={colors.ink} strokeWidth={2} /></View>
+            <Text style={styles.statusText}>
+              {active.recipient_ids.length} {active.recipient_ids.length === 1 ? "person" : "people"} notified
+            </Text>
+          </View>
+          <Text style={styles.statusMuted}>Last check-in {last.toLocaleTimeString()}</Text>
+
+          <View style={styles.pairRow}>
+            <Pressable style={[styles.pairBtn, { borderColor: colors.riskHigh }]} onPress={() => navigation.navigate("Panic")}>
+              <Siren size={17} color={colors.riskHigh} strokeWidth={2} />
+              <Text style={[styles.pairText, { color: colors.riskHigh }]}>Emergency</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.pairBtn, { borderColor: colors.safe }, checking && { opacity: 0.6 }]}
+              onPress={confirmSafe}
+              disabled={checking}
+            >
+              <Check size={17} color={colors.safe} strokeWidth={2.4} />
+              <Text style={[styles.pairText, { color: colors.safe }]}>{checking ? "Sending" : "Check-in"}</Text>
+            </Pressable>
+          </View>
+        </View>
       </SafeAreaView>
     );
   }
 
+  // ----------------------------------------------------------------- SETUP --
+  const chosen = members.filter((m) => selected.indexOf(m.member_id) >= 0);
+
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={["top"]}>
-      {Header}
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl + insets.bottom }}>
-        <Text style={[styles.section, { color: colors.text }]}>Check in every</Text>
-        <View style={styles.chipRow}>
-          {INTERVALS.map((n) => {
-            const on = !intervalCustomOn && interval === n;
-            return (
-              <Pressable key={n} onPress={() => { setIntervalCustomOn(false); setIntervalMin(n); }} style={[styles.chip, { borderColor: on ? colors.accentOn : glass.stroke, backgroundColor: on ? colors.accentOn : glass.surface }]}>
-                <Text style={[styles.chipText, { color: on ? "#ffffff" : colors.text }]}>{n} min</Text>
-              </Pressable>
-            );
-          })}
-          <Pressable onPress={() => setIntervalCustomOn(true)} style={[styles.chip, { borderColor: intervalCustomOn ? colors.accentOn : glass.stroke, backgroundColor: intervalCustomOn ? colors.accentOn : glass.surface }]}>
-            <Text style={[styles.chipText, { color: intervalCustomOn ? "#ffffff" : colors.text }]}>Custom</Text>
-          </Pressable>
-        </View>
-        {intervalCustomOn ? (
-          <View style={styles.customRow}>
-            <TextInput value={customInterval} onChangeText={setCustomInterval} keyboardType="number-pad" placeholder="minutes" placeholderTextColor={colors.textFaint} style={[styles.customInput, { color: colors.text, borderColor: glass.stroke, backgroundColor: glass.surface, width: 90 }]} />
-            <Text style={[styles.muted, { color: colors.textMuted }]}>minutes (5 to 180)</Text>
-          </View>
-        ) : null}
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <Header
+        title="Trip Watch"
+        onBack={() => (step === "review" ? setStep("details") : navigation.goBack())}
+      />
+      <Map marker={dest} />
 
-        <Text style={[styles.section, { color: colors.text }]}>Who to notify</Text>
-        {members.length === 0 ? (
-          <Text style={[styles.muted, { color: colors.textMuted }]}>Add people to your network first to notify them.</Text>
-        ) : (
-          <View style={{ gap: spacing.sm }}>
-            {members.map((m) => {
-              const on = selected.includes(m.member_id);
-              const ac = avatarColor(m.member_id);
-              return (
-                <Pressable key={m.member_id} onPress={() => toggle(m.member_id)} style={[styles.memberRow, { borderColor: on ? colors.accentOn : glass.stroke, backgroundColor: glass.surface }]}>
-                  <Avatar uri={m.avatar_url} name={m.display_name} id={m.member_id} size={36} />
-                  <Text style={[styles.mName, { color: colors.text, flex: 1 }]}>{m.display_name ?? "FlagRisk user"}</Text>
-                  <View style={[styles.checkBox, { borderColor: on ? colors.accentOn : glass.strokeStrong, backgroundColor: on ? colors.accentOn : "transparent" }]}>
-                    {on && <Check size={14} color={colors.accentText} strokeWidth={3} />}
-                  </View>
+      <View style={styles.sheet}>
+        <View style={styles.sheetGrab} />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.lg }}>
+          {step === "details" ? (
+            <>
+              <Text style={styles.sheetTitle}>Trip details</Text>
+              <Text style={styles.sheetSub}>Share trip details so your contacts can follow and be alerted.</Text>
+
+              <Text style={styles.label}>Destination</Text>
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldIcon}><MapPin size={17} color={colors.riskHigh} strokeWidth={2} /></View>
+                <Text style={styles.fieldText} numberOfLines={1}>
+                  {dest ? dest.lat.toFixed(5) + ", " + dest.lng.toFixed(5) : "Tap the map to set a destination"}
+                </Text>
+                {dest ? (
+                  <Pressable onPress={() => setDest(null)} hitSlop={8}>
+                    <X size={17} color={colors.textMuted} strokeWidth={2} />
+                  </Pressable>
+                ) : null}
+              </View>
+              <Text style={styles.hint}>Optional. With a destination set, arrival ends the trip automatically.</Text>
+
+              <Text style={styles.label}>Check in every</Text>
+              <View style={styles.chipRow}>
+                {INTERVALS.map((m) => {
+                  const on = !customIntervalOn && interval === m;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => { setCustomIntervalOn(false); setIntervalMin(m); }}
+                      style={[styles.chip, on && styles.chipOn]}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{m} min</Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => setCustomIntervalOn(true)}
+                  style={[styles.chip, customIntervalOn && styles.chipOn]}
+                >
+                  <Text style={[styles.chipText, customIntervalOn && styles.chipTextOn]}>Custom</Text>
                 </Pressable>
-              );
-            })}
-          </View>
-        )}
+              </View>
+              {customIntervalOn ? (
+                <TextInput
+                  style={styles.input}
+                  value={customInterval}
+                  onChangeText={setCustomInterval}
+                  keyboardType="number-pad"
+                  placeholder="Minutes, between 5 and 180"
+                  placeholderTextColor="#9F9F9F"
+                />
+              ) : null}
 
-        <Text style={[styles.section, { color: colors.text }]}>Stop after</Text>
-        <View style={styles.chipRow}>
-          {DURATIONS.map((d) => {
-            const on = !customOn && durationHours === d.hours;
-            return (
-              <Pressable key={d.label} onPress={() => { setCustomOn(false); setDurationHours(d.hours); }} style={[styles.chip, { borderColor: on ? colors.accentOn : glass.stroke, backgroundColor: on ? colors.accentOn : glass.surface }]}>
-                <Text style={[styles.chipText, { color: on ? "#ffffff" : colors.text }]}>{d.label}</Text>
+              <Text style={styles.label}>Stop after</Text>
+              <View style={styles.chipRow}>
+                {DURATIONS.map((d) => {
+                  const on = durationHours === d.hours;
+                  return (
+                    <Pressable key={d.label} onPress={() => setDurationHours(d.hours)} style={[styles.chip, on && styles.chipOn]}>
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>{d.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Pressable style={styles.primaryBtn} onPress={() => setStep("review")}>
+                <Text style={styles.primaryText}>Next</Text>
+                <ChevronRight size={18} color={colors.accent} strokeWidth={2.4} />
               </Pressable>
-            );
-          })}
-          <Pressable onPress={() => { setCustomOn(true); setDurationHours(null); }} style={[styles.chip, { borderColor: customOn ? colors.accentOn : glass.stroke, backgroundColor: customOn ? colors.accentOn : glass.surface }]}>
-            <Text style={[styles.chipText, { color: customOn ? "#ffffff" : colors.text }]}>Custom</Text>
-          </Pressable>
-        </View>
-        {customOn ? (
-          <View style={styles.customRow}>
-            <TextInput value={customHours} onChangeText={setCustomHours} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.textFaint} style={[styles.customInput, { color: colors.text, borderColor: glass.stroke, backgroundColor: glass.surface }]} />
-            <Text style={[styles.muted, { color: colors.textMuted }]}>hours</Text>
-            <TextInput value={customMins} onChangeText={setCustomMins} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.textFaint} style={[styles.customInput, { color: colors.text, borderColor: glass.stroke, backgroundColor: glass.surface }]} />
-            <Text style={[styles.muted, { color: colors.textMuted }]}>minutes</Text>
-          </View>
-        ) : null}
+            </>
+          ) : (
+            <>
+              <Text style={styles.sheetTitle}>Review summary</Text>
+              <Text style={styles.sheetSub}>Review your trip summary.</Text>
 
-        <Text style={[styles.section, { color: colors.text }]}>Destination (optional)</Text>
-        <Text style={[styles.muted, { color: colors.textMuted, marginBottom: spacing.sm }]}>Tap the map to set where you are going. Your trip ends automatically when you arrive.</Text>
-        <View style={styles.mapBox}>
-          <MapView
-            ref={mapRef}
-            provider={PROVIDER_GOOGLE}
-            style={StyleSheet.absoluteFill}
-            initialRegion={{ ...DEFAULT_REGION, ...INITIAL_DELTA }}
-            onPress={(e) => setDest({ lat: e.nativeEvent.coordinate.latitude, lng: e.nativeEvent.coordinate.longitude })}
-          >
-            {dest ? <Marker coordinate={{ latitude: dest.lat, longitude: dest.lng }} anchor={{ x: 0.5, y: 1 }}><MapPin size={34} color={colors.accentOn} fill={colors.accentOn} strokeWidth={1.5} /></Marker> : null}
-          </MapView>
-          {dest ? (
-            <Pressable style={[styles.clearDest, { backgroundColor: glass.surface, borderColor: glass.stroke }]} onPress={() => setDest(null)}>
-              <Text style={[styles.clearDestText, { color: colors.text }]}>Clear</Text>
-            </Pressable>
-          ) : null}
-        </View>
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryRow}>
+                  <MapPin size={17} color={colors.riskHigh} strokeWidth={2} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.summaryLabel}>Destination</Text>
+                    <Text style={styles.summaryValue}>
+                      {dest ? dest.lat.toFixed(5) + ", " + dest.lng.toFixed(5) : "Not set"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Clock size={17} color={colors.ink} strokeWidth={2} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.summaryLabel}>Check in every</Text>
+                    <Text style={styles.summaryValue}>
+                      {customIntervalOn ? (customInterval || "-") : interval} minutes
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.summaryRow, { borderBottomWidth: 0 }]}>
+                  <Clock size={17} color={colors.ink} strokeWidth={2} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.summaryLabel}>Stop after</Text>
+                    <Text style={styles.summaryValue}>
+                      {durationHours == null ? "Open ended" : durationHours + " hours"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
-        <Text style={[styles.note, { color: colors.textFaint }]}>
-          Check-ins run in the background. Shorter intervals and background location use more battery, and timing is approximate.
-        </Text>
+              <View style={styles.shareHead}>
+                <Text style={styles.label}>Sharing with ({chosen.length})</Text>
+                <Pressable onPress={() => navigation.navigate("Network")} hitSlop={8}>
+                  <Text style={styles.addLink}>Add contact</Text>
+                </Pressable>
+              </View>
 
-        <Pressable style={{ marginTop: spacing.md }} onPress={startTrip} disabled={starting}>
-          <LinearGradient colors={gradients.brand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.primaryBtn, { boxShadow: glow.brand, opacity: starting ? 0.6 : 1 }]}>
-            <Text style={[styles.primaryText, { color: colors.accentText }]}>{starting ? "Starting..." : "Start trip"}</Text>
-          </LinearGradient>
-        </Pressable>
-      </ScrollView>
+              {members.length === 0 ? (
+                <Text style={styles.hint}>You have no one in your network yet. Add someone first.</Text>
+              ) : (
+                members.map((m) => {
+                  const on = selected.indexOf(m.member_id) >= 0;
+                  return (
+                    <Pressable key={m.member_id} onPress={() => toggle(m.member_id)} style={styles.memberRow}>
+                      <Avatar uri={m.avatar_url} name={m.display_name} id={m.member_id} size={40} />
+                      <Text style={styles.memberName} numberOfLines={1}>{m.display_name ?? "FlagRisk user"}</Text>
+                      <View style={[styles.tick, on && styles.tickOn]}>
+                        {on ? <Check size={14} color={colors.accent} strokeWidth={3} /> : null}
+                      </View>
+                    </Pressable>
+                  );
+                })
+              )}
+
+              {!isPro ? (
+                <Text style={styles.hint}>
+                  Trip Watch is available on Pro and higher. Starting a trip will offer you the plans.
+                </Text>
+              ) : null}
+
+              <Pressable
+                style={[styles.primaryBtn, starting && { opacity: 0.7 }]}
+                onPress={startTrip}
+                disabled={starting}
+              >
+                <Text style={styles.primaryText}>{starting ? "Starting" : "Start Trip Watch"}</Text>
+              </Pressable>
+            </>
+          )}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeBanner: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.lg },
-  safeBannerTitle: { fontSize: 16, fontWeight: "800" },
-  safeBannerBody: { fontSize: 14, marginTop: 4, lineHeight: 20 },
-  safeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: radius.md },
-  safeBtnText: { fontSize: 15, fontWeight: "800" },
-  safe: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
-  headerTitle: { fontSize: 20, fontWeight: "800", marginLeft: 4 },
-  muted: { fontSize: 13 },
-  section: { fontSize: 15, fontWeight: "800", marginTop: spacing.lg, marginBottom: spacing.sm },
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  header: { height: 36, flexDirection: "row", alignItems: "center", marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
+
+  mapWrap: { height: 260, marginTop: spacing.md, overflow: "hidden" },
+
+  sheet: {
+    flex: 1, backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    marginTop: -radius.lg, paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
+    ...elevation.sheet,
+  },
+  sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  sheetHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sheetTitle: { ...type.heading, color: colors.ink },
+  sheetSub: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+  endLink: { ...type.label, fontWeight: "600", color: colors.riskHigh },
+
+  label: { ...type.label, fontWeight: "500", color: colors.ink, marginTop: spacing.lg, marginBottom: spacing.sm },
+  hint: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 17 },
+
+  fieldRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md, height: 56,
+  },
+  fieldIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  fieldText: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink },
+
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  chip: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: radius.md, borderWidth: 1 },
-  chipText: { fontSize: 14, fontWeight: "700" },
-  memberRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderRadius: radius.md, borderWidth: 1 },
-  mAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  mAvatarText: { color: "#fff", fontWeight: "800", fontSize: 13 },
-  mName: { fontSize: 15, fontWeight: "600" },
-  checkBox: { width: 24, height: 24, borderRadius: 7, borderWidth: 2, alignItems: "center", justifyContent: "center" },
-  customRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.sm },
-  customInput: { width: 60, borderWidth: 1, borderRadius: radius.md, paddingVertical: 8, paddingHorizontal: 12, fontSize: 15, textAlign: "center" },
-  mapBox: { height: 200, borderRadius: radius.lg, overflow: "hidden" },
-  clearDest: { position: "absolute", top: 10, right: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: radius.md, borderWidth: 1 },
-  clearDestText: { fontSize: 13, fontWeight: "700" },
-  note: { fontSize: 12.5, lineHeight: 18, marginTop: spacing.lg },
-  card: { borderWidth: 1, borderRadius: radius.lg, padding: spacing.lg },
-  cardTitle: { fontSize: 17, fontWeight: "800" },
-  cardBody: { fontSize: 14, lineHeight: 21, marginTop: spacing.sm },
-  primaryBtn: { paddingVertical: 15, borderRadius: radius.lg, alignItems: "center" },
-  primaryText: { fontSize: 16, fontWeight: "800" },
-  rowLine: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.sm },
-  rowText: { fontSize: 14, fontWeight: "600" },
-  pulse: { width: 10, height: 10, borderRadius: 5 },
-  stopBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 15, borderRadius: radius.lg, borderWidth: 1.5 },
-  stopText: { fontSize: 16, fontWeight: "800" },
+  chip: { height: 38, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  chipText: { fontSize: 13, lineHeight: 17, fontWeight: "500", color: colors.ink },
+  chipTextOn: { color: colors.accent, fontWeight: "600" },
+
+  input: {
+    height: 48, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
+    paddingHorizontal: spacing.md, ...type.body, color: colors.ink, marginTop: spacing.sm,
+  },
+
+  summaryCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  summaryRow: {
+    flexDirection: "row", alignItems: "center", gap: spacing.ms,
+    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  summaryLabel: { ...type.caption, color: colors.textMuted },
+  summaryValue: { ...type.label, color: colors.ink, marginTop: 2 },
+
+  shareHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  addLink: { ...type.caption, fontWeight: "600", color: colors.ink },
+  memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border },
+  memberName: { flex: 1, ...type.label, color: colors.ink },
+  tick: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  tickOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+
+  statusRow: { flexDirection: "row", alignItems: "center", gap: spacing.ms, marginTop: spacing.md },
+  statusIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+  statusText: { ...type.label, fontWeight: "500", color: colors.ink },
+  statusMuted: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+
+  warnCard: { backgroundColor: "#FDE7CF", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md },
+  warnTitle: { ...type.label, fontWeight: "600", color: "#B26A12" },
+  warnBody: { ...type.caption, color: "#B26A12", marginTop: 3, lineHeight: 17 },
+
+  pairRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
+  pairBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    height: 52, borderRadius: radius.md, borderWidth: 1,
+  },
+  pairText: { ...type.label, fontWeight: "600" },
+
+  primaryBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    height: 52, borderRadius: radius.md, backgroundColor: colors.ink, marginTop: spacing.xl,
+  },
+  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
 });
