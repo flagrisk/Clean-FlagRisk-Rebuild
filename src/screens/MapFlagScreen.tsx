@@ -1,21 +1,23 @@
 // ============================================================================
 // Map and flag - FlagRisk v2.1
-// Reskinned to the 2.1 system. Behaviour preserved.
 //
-// TWO STRUCTURAL FIXES CARRIED IN:
-//  1. The sheet, the member picker and the incident chooser were three sibling
-//     Modals. Android cannot reliably show a second Modal while the first is
-//     visible, which is why the network picker did not open until a tester
-//     cancelled back to the map and returned. They are now ONE Modal with a
-//     mode, so the problem cannot recur.
-//  2. The confirmation used to report the severity the user selected. The
-//     engine decides the real outcome and returns it, and the client was
-//     throwing that away, so a user could pick High and then find Low on the
-//     incident. It now reports what the engine actually decided.
+// STRUCTURAL DECISIONS, each made because the obvious version failed:
+//  1. ONE Modal with a mode, not four siblings. Android cannot reliably show a
+//     second Modal while the first is visible, which is why the network picker
+//     did not open until a tester cancelled back to the map and returned.
+//  2. The confirmation reports what the ENGINE decided, not what the reporter
+//     selected. A user could pick High and find Low on the incident.
+//  3. Marker taps are guarded by a timestamp, not by nativeEvent.action, which
+//     Android does not always set. Without it, tapping an incident opened the
+//     report sheet instead.
+//  4. Every incident is plotted, at any distance. NEAREST_RADIUS_KM applies only
+//     to the Low, Mid and High pills, which fly to the closest of that level.
+//  5. Reporting is capped at REPORT_RADIUS_M from where you are, enforced again
+//     in ingest_report so the client is not the only thing holding the rule.
 //
 // KNOWN LIMIT, unchanged: one evidence slot. Attaching a video after a photo
 // replaces it. The report record carries a single media_url, so fixing this is
-// a schema change, not a screen change. The interface now says so.
+// a schema change, not a screen change. The interface says so.
 // ============================================================================
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -42,7 +44,7 @@ type Incident = {
 type Pt = { lat: number; lng: number };
 type Member = {
   member_id: string; display_name: string | null; avatar_url?: string | null;
-  within_reach?: boolean; has_location?: boolean;
+  within_reach?: boolean; has_location?: boolean; can_nudge?: boolean;
 };
 type SheetMode = "none" | "profile" | "members" | "stack" | "incident";
 
@@ -111,6 +113,7 @@ export function MapFlagScreen() {
   const [coords, setCoords] = useState(cache.loc ?? DEFAULT);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [locationOff, setLocationOff] = useState(false);
+  const [nudging, setNudging] = useState<string | null>(null);
   const [mapType, setMapType] = useState<"standard" | "hybrid">("standard");
 
   const [picked, setPicked] = useState<Pt | null>(null);
@@ -356,12 +359,39 @@ export function MapFlagScreen() {
           .then(({ data }) => {
             if (data) setMembers((cur) => cur.map((m) => {
               const r = (data as any[]).find((x) => x.member_id === m.member_id);
-              return r ? { ...m, within_reach: r.within_reach, has_location: r.has_location } : m;
+              return r ? { ...m, within_reach: r.within_reach, has_location: r.has_location, can_nudge: r.can_nudge } : m;
             }));
           });
       });
     }
     setMode("members");
+  }
+
+  // A member with no recent fix is unreachable on any plan. Rather than a dead
+  // row, the person trying to reach them can ask them to turn location on.
+  async function nudge(m: Member) {
+    if (nudging) return;
+    setNudging(m.member_id);
+    const { data, error } = await supabase.rpc("nudge_network_member", { p_member: m.member_id });
+    setNudging(null);
+    if (error) {
+      return showAlert({ title: "Could not send", message: "Please try again.", tone: "error" });
+    }
+    const r = data && (data as any).reason;
+    if (data && (data as any).ok) {
+      return showAlert({
+        title: "Nudge sent",
+        message: (m.display_name ?? "They") + " has been asked to turn location on.",
+      });
+    }
+    showAlert({
+      title: "Not sent",
+      message:
+        r === "already_nudged" ? "They were nudged in the last day. Try again tomorrow."
+        : r === "no_push_token" ? "They cannot be reached until they open FlagRisk again."
+        : "They are no longer in your network.",
+      tone: "error",
+    });
   }
 
   async function sendAlert() {
@@ -626,12 +656,29 @@ export function MapFlagScreen() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.mName} numberOfLines={1}>{m.display_name ?? "FlagRisk user"}</Text>
                           {m.within_reach === false ? (
-                            <Text style={styles.outOfRange}>Beyond your plan range</Text>
+                            <Text style={styles.outOfRange}>
+                              {m.has_location === false
+                                ? "This user is inactive"
+                                : "Beyond your plan range"}
+                            </Text>
                           ) : null}
                         </View>
-                        <View style={[styles.tick, on && styles.tickOn]}>
-                          {on ? <Check size={14} color={colors.accent} strokeWidth={3} /> : null}
-                        </View>
+                        {m.within_reach === false && m.has_location === false && m.can_nudge ? (
+                          <Pressable
+                            onPress={() => nudge(m)}
+                            disabled={nudging === m.member_id}
+                            style={[styles.nudgeBtn, nudging === m.member_id && { opacity: 0.5 }]}
+                            hitSlop={8}
+                          >
+                            <Text style={styles.nudgeText}>
+                              {nudging === m.member_id ? "Sending" : "Nudge"}
+                            </Text>
+                          </Pressable>
+                        ) : (
+                          <View style={[styles.tick, on && styles.tickOn]}>
+                            {on ? <Check size={14} color={colors.accent} strokeWidth={3} /> : null}
+                          </View>
+                        )}
                       </Pressable>
                     );
                   })}
@@ -639,12 +686,27 @@ export function MapFlagScreen() {
                 <Pressable
                   style={[styles.confirmPick, { marginTop: spacing.md }]}
                   onPress={() => {
-                    const blocked = members.filter((m) => selectedMembers.includes(m.member_id) && m.within_reach === false);
-                    if (blocked.length > 0) {
+                    const chosen = members.filter((m) => selectedMembers.includes(m.member_id));
+                    const inactive = chosen.filter((m) => m.within_reach === false && m.has_location === false);
+                    const tooFar = chosen.filter((m) => m.within_reach === false && m.has_location !== false);
+
+                    // Two different problems. Offering an upgrade for an
+                    // inactive member would be selling a plan that cannot fix it.
+                    if (inactive.length > 0) {
+                      showAlert({
+                        title: inactive.length === 1 ? "This user is inactive" : "Some contacts are inactive",
+                        message: inactive.map((m) => m.display_name ?? "A contact").join(", ") +
+                          (inactive.length === 1 ? " has" : " have") +
+                          " not shared a location recently, so they cannot be alerted. Nudge them to turn location on.",
+                        buttons: [{ text: "Got it", onPress: () => setMode("members") }],
+                      });
+                      return;
+                    }
+                    if (tooFar.length > 0) {
                       showAlert({
                         title: "Some contacts are out of range",
-                        message: blocked.map((m) => m.display_name ?? "A contact").join(", ") +
-                          (blocked.length === 1 ? " is" : " are") +
+                        message: tooFar.map((m) => m.display_name ?? "A contact").join(", ") +
+                          (tooFar.length === 1 ? " is" : " are") +
                           " beyond your plan's alert radius, so they will not receive this. Upgrade to widen your reach.",
                         buttons: [
                           { text: "Keep anyway", style: "cancel", onPress: () => setMode("profile") },
@@ -848,20 +910,20 @@ const styles = StyleSheet.create({
   pickerText: { ...type.label, fontWeight: "500", color: colors.ink },
 
   actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
-  // Cancel retreats, so it takes the muted outline. Send flag raises a warning
-  // about a real place, so it takes amber, which is the attention colour in this
-  // system. Neither is filled.
-  // An exit is silver, like every other exit. Outline colour is reserved for
-  // meaning: red for danger, amber for raising a flag, green for confirming safety.
+  // Cancel is an exit, so it is silver like every other exit. Outline colour is
+  // reserved for meaning: red for danger, amber for raising a flag, green for
+  // confirming safety.
   ghostBtn: {
     flex: 1, height: 52, borderRadius: radius.md,
     backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
     alignItems: "center", justifyContent: "center",
   },
   ghostText: { ...type.label, fontWeight: "600", color: colors.ink },
-  // No flex here. This button is used both inside a row and alone in a column,
-  // and flex: 1 in a column makes it fight the scrolling list and collapse.
-  // The row usage adds flex explicitly.
+  // Send flag is amber: it raises a warning about a real place, and amber is the
+  // attention colour in this system. Outline only, like every coloured button.
+  // No flex here either. This style is used inside a row and alone in a column,
+  // and flex: 1 in a column makes it fight the scrolling list and collapse, so
+  // the row usage adds flex explicitly.
   sendBtn: {
     alignSelf: "stretch", height: 52, borderRadius: radius.md,
     backgroundColor: "transparent", borderWidth: 1, borderColor: colors.riskMedium,
@@ -877,6 +939,11 @@ const styles = StyleSheet.create({
 
   memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border },
   mName: { ...type.label, color: colors.ink },
+  nudgeBtn: {
+    borderRadius: radius.sm, borderWidth: 1, borderColor: "rgba(20,21,42,0.28)",
+    backgroundColor: colors.bg, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  nudgeText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
   outOfRange: { ...type.caption, color: colors.riskHigh, marginTop: 2 },
   tick: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   tickOn: { backgroundColor: colors.ink, borderColor: colors.ink },

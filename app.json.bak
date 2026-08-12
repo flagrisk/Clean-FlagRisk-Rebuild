@@ -1,0 +1,97 @@
+﻿{
+  "expo": {
+    "name": "FlagRisk",
+    "slug": "app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1B1E3D",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.flagrisk.app",
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD0C6vTSdxVjAclC9KZqLR93wnYhElZ1-E"
+        }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_CONTACTS",
+        "WRITE_CONTACTS",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ],
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "73a0efca-d1d5-4702-bf9a-183ff3e63f94"
+      }
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "FlagRisk uses your location to show nearby safety alerts, to share your location during a panic alert, and to check you in during a trip so your chosen people know you are safe, even when the app is closed.",
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FlagRisk uses the camera to let you capture live video evidence when reporting an incident."
+        }
+      ],
+      "expo-notifications",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "FlagRisk uses your contacts to let you add people you trust to your safety circle."
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 140,
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F5FA"
+        }
+      ],
+      "expo-video"
+    ],
+    "scheme": "flagrisk",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/73a0efca-d1d5-4702-bf9a-183ff3e63f94"
+    }
+  }
+}
+
+
+
+
+
+
+
