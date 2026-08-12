@@ -1,5 +1,5 @@
-﻿// ============================================================================
-// FlagRisk app — root navigation (auth-aware) + theme provider.
+// ============================================================================
+// FlagRisk app: root navigation (auth-aware) and theme provider.
 // ============================================================================
 
 import "react-native-url-polyfill/auto";
@@ -78,7 +78,7 @@ function logActivityThrottled() {
   } catch (_e) {}
 }
 
-import { registerForPush, logLocationOnce } from "./lib/push";
+import { registerForPush, logLocationOnce, ensureAndroidChannel } from "./lib/push";
 import { ThemeProvider, useTheme } from "./src/theme/ThemeProvider";
 import { RiskCacheProvider, useRiskCache } from "./src/theme/RiskCache";
 import { SplashScreen } from "./src/screens/SplashScreen";
@@ -126,7 +126,8 @@ function Root() {
       const d = resp && resp.notification && resp.notification.request &&
         resp.notification.request.content ? resp.notification.request.content.data : null;
       const route = d ? d.route : null;
-      const params = d && d.incidentId ? { incidentId: d.incidentId } : undefined;
+      const id = d ? (d.incident_id || d.incidentId) : null;
+      const params = id ? { incidentId: id } : undefined;
       if (route) goToRoute(route, params);
     }).catch(() => {});
     // Deep-link: warm tap (app running/backgrounded).
@@ -134,9 +135,16 @@ function Root() {
       const d = resp && resp.notification && resp.notification.request &&
         resp.notification.request.content ? resp.notification.request.content.data : null;
       const route = d ? d.route : null;
-      const params = d && d.incidentId ? { incidentId: d.incidentId } : undefined;
+      const id = d ? (d.incident_id || d.incidentId) : null;
+      const params = id ? { incidentId: id } : undefined;
       if (route) goToRoute(route, params);
     });
+    // The channel decides whether an alert is a heads-up banner with sound. It
+    // is created here, unconditionally, because creating it inside
+    // registerForPush meant a device that refused permission and granted it
+    // later in settings never got one.
+    ensureAndroidChannel();
+
     supabase.auth.getSession().then(({ data }) => {
       setSignedIn(!!data.session);
       setReady(true);
@@ -183,7 +191,7 @@ function Root() {
               <Stack.Screen name="Network" component={NetworkScreen} />
               <Stack.Screen name="Panic" component={PanicScreen} />
               <Stack.Screen name="IncidentDetail" component={IncidentDetailScreen} />
-              <Stack.Screen name="RiskBreakdown" component={RiskBreakdownScreen} options={{ presentation: "transparentModal", animation: "slide_from_bottom" }} />
+              <Stack.Screen name="RiskBreakdown" component={RiskBreakdownScreen} />
               <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="TripWatch" component={TripWatchScreen} />
         <Stack.Screen name="Help" component={HelpScreen} />
@@ -207,9 +215,9 @@ function Root() {
             </>
           ) : (
             <>
-              <Stack.Screen name="SignIn" component={SignInScreen} />
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
               <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
+              <Stack.Screen name="SignIn" component={SignInScreen} />
               <Stack.Screen name="Help" component={HelpScreen} />
               <Stack.Screen name="HelpArticle" component={HelpArticleScreen} />
             </>
@@ -231,8 +239,6 @@ export default function App() {
     </ThemeProvider>
   );
 }
-
-
 
 
 

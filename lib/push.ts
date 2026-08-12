@@ -9,31 +9,42 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { supabase } from "./supabase";
-import { goToRoute } from "../src/navigation/navRef";
 
 // Show notifications while the app is foregrounded too.
+// shouldShowAlert was removed in expo-notifications 0.32. Returning it means the
+// handler resolves with an unknown key, the defaults apply, and every
+// notification arriving while the app is open is silently suppressed.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
   }),
 });
 
-// When the user TAPS a push, route to the screen carried in its data payload.
-// The route is set server-side by pending_push_notifications (kind -> route) and
-// delivered by send-push in the push data. Falls back to no-op if absent.
-Notifications.addNotificationResponseReceivedListener((response) => {
+// Tap handling lives in App.tsx, which covers both the cold start
+// (getLastNotificationResponseAsync) and the warm tap. A second listener here
+// meant every tap was handled twice.
+
+export async function ensureAndroidChannel() {
+  if (Platform.OS !== "android") return;
   try {
-    const data = (response && response.notification && response.notification.request
-      && response.notification.request.content && response.notification.request.content.data) || {};
-    const route = data.route;
-    if (route && typeof route === "string") {
-      goToRoute(route);
-    }
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "FlagRisk Alerts",
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#D4FF24",
+      sound: "default",
+      enableVibrate: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
   } catch (_e) {}
-});
+}
 
 export async function registerForPush() {
   try {
+    await ensureAndroidChannel();
     const { status: existing } = await Notifications.getPermissionsAsync();
     let status = existing;
     if (existing !== "granted") {
@@ -41,16 +52,6 @@ export async function registerForPush() {
       status = req.status;
     }
     if (status !== "granted") return;
-
-    // Android needs a notification channel for heads-up alerts.
-    if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("default", {
-        name: "FlagRisk Alerts",
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#c4d600",
-      });
-    }
 
     const projectId =
       (Constants.expoConfig as any)?.extra?.eas?.projectId ??

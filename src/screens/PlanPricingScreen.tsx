@@ -10,11 +10,19 @@
 // ============================================================================
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ArrowLeft, Check, Plus, Minus, Globe } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
 import { colors, radius, spacing, type, elevation } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 type Period = "monthly" | "annual";
 
@@ -60,11 +68,11 @@ export function PlanPricingScreen() {
 
   const canBuy = (id: string) => (RANK[id] ?? 99) > (RANK[current] ?? 0);
 
-  const Feature = ({ value, label, hero }: { value: string; label: string; hero: boolean }) => (
+  const Feature = ({ value, label }: { value: string; label: string }) => (
     <View style={styles.featureRow}>
-      <Check size={15} color={hero ? colors.accent : colors.ink} strokeWidth={2.6} />
-      <Text style={[styles.featureText, hero && { color: "rgba(255,255,255,0.85)" }]}>
-        <Text style={[styles.featureValue, hero && { color: "#FFFFFF" }]}>{value}</Text>
+      <Check size={15} color={colors.ink} strokeWidth={2.6} />
+      <Text style={styles.featureText}>
+        <Text style={styles.featureValue}>{value}</Text>
         {label ? " " + label : ""}
       </Text>
     </View>
@@ -77,10 +85,10 @@ export function PlanPricingScreen() {
     return (
       <View style={[styles.card, hero && styles.cardHero, isCurrent && !hero && styles.cardCurrent]}>
         <View style={styles.cardTop}>
-          <Text style={[styles.tierName, hero && { color: "#FFFFFF" }]}>{t.name}</Text>
+          <Text style={styles.tierName}>{t.name}</Text>
           {isCurrent ? (
-            <View style={[styles.badge, hero && { backgroundColor: "rgba(255,255,255,0.18)" }]}>
-              <Text style={[styles.badgeText, hero && { color: "#FFFFFF" }]}>Current</Text>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>Current</Text>
             </View>
           ) : hero ? (
             <View style={styles.badgeLime}>
@@ -90,31 +98,32 @@ export function PlanPricingScreen() {
         </View>
 
         <View style={styles.priceRow}>
-          <Text style={[styles.price, hero && { color: "#FFFFFF" }]}>{price === 0 ? "Free" : naira(price)}</Text>
+          <Text style={styles.price}>{price === 0 ? "Free" : naira(price)}</Text>
           {price !== 0 ? (
-            <Text style={[styles.per, hero && { color: "rgba(255,255,255,0.7)" }]}>
+            <Text style={styles.per}>
               per {period === "monthly" ? "month" : "year"}
             </Text>
           ) : null}
         </View>
 
         <View style={styles.features}>
-          <Feature value={t.radius} label="alert radius" hero={hero} />
-          <Feature value={t.retention} label="history" hero={hero} />
-          <Feature value={t.ads} label="" hero={hero} />
-          <Feature value={t.verification} label="verification" hero={hero} />
+          <Feature value={t.radius} label="alert radius" />
+          <Feature value={t.retention} label="history" />
+          <Feature value={t.ads} label="" />
+          <Feature value={t.verification} label="verification" />
         </View>
 
         {isCurrent ? (
-          <View style={[styles.ctaGhost, hero && { borderColor: "rgba(255,255,255,0.3)" }]}>
-            <Text style={[styles.ctaGhostText, hero && { color: "#FFFFFF" }]}>Your current plan</Text>
+          <View style={styles.ctaGhost}>
+            <Text style={styles.ctaGhostText}>Your current plan</Text>
           </View>
         ) : canBuy(t.id) ? (
           <Pressable
-            style={[styles.cta, hero && styles.ctaOnHero]}
+            style={styles.cta}
             onPress={() => navigation.navigate("Checkout", { tierId: t.id, tierName: t.name, price, period })}
           >
-            <Text style={[styles.ctaText, hero && { color: colors.ink }]}>Choose {t.name}</Text>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+            <Text style={styles.ctaText}>Choose {t.name}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -196,7 +205,7 @@ export function PlanPricingScreen() {
             onPress={() => setCustomUnlimited((v) => !v)}
           >
             <Globe size={16} color={customUnlimited ? colors.accent : colors.ink} strokeWidth={2.2} />
-            <Text style={[styles.unlimitedText, customUnlimited && { color: colors.accent }]}>
+            <Text style={[styles.unlimitedText, customUnlimited && { color: colors.ink }]}>
               {customUnlimited ? "Unlimited selected. Tap for custom distance." : "Or go global and unlimited"}
             </Text>
           </Pressable>
@@ -212,6 +221,7 @@ export function PlanPricingScreen() {
               customUnlimited,
             })}
           >
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.customBuyText}>Get this coverage</Text>
           </Pressable>
         </View>
@@ -240,7 +250,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg, padding: 4, gap: 4,
   },
   segmentBtn: { flex: 1, height: 36, borderRadius: 6, alignItems: "center", justifyContent: "center" },
-  segmentBtnOn: { backgroundColor: "#333333" },
+  segmentBtnOn: { backgroundColor: colors.ink },
   segmentText: { fontSize: 13, lineHeight: 17, fontWeight: "500", color: "#91958E" },
   segmentTextOn: { color: "#FFFFFF", fontWeight: "600" },
   saveHint: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center", marginTop: spacing.sm },
@@ -249,7 +259,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
     padding: spacing.md, marginTop: spacing.md,
   },
-  cardHero: { backgroundColor: colors.ink, borderColor: colors.ink, ...elevation.card },
+  cardHero: { borderWidth: 1.5, borderColor: colors.ink, ...elevation.card },
   cardCurrent: { borderColor: colors.borderStrong },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   tierName: { ...type.subheading, color: colors.ink },
@@ -267,16 +277,15 @@ const styles = StyleSheet.create({
   featureText: { ...type.caption, color: colors.textMuted, flex: 1 },
   featureValue: { fontWeight: "700", color: colors.ink },
 
-  cta: { height: 48, borderRadius: radius.sm, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  ctaOnHero: { backgroundColor: colors.accent },
-  ctaText: { ...type.label, fontWeight: "600", color: colors.accent },
+  cta: { height: 48, borderRadius: radius.sm, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center", marginTop: spacing.md },
+  ctaText: { ...type.label, fontWeight: "600", color: colors.accent},
   ctaGhost: {
     height: 48, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
     alignItems: "center", justifyContent: "center", marginTop: spacing.md,
   },
   ctaGhostText: { ...type.label, fontWeight: "600", color: colors.textMuted },
 
-  customCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
+  customCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
   customHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   customTitle: { ...type.subheading, color: colors.ink },
   customSub: { ...type.caption, color: colors.textMuted, marginTop: 6, lineHeight: 17 },
@@ -297,9 +306,9 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
     height: 44, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, marginTop: spacing.md,
   },
-  unlimitedToggleOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  unlimitedToggleOn: { backgroundColor: "#EDEDED", borderWidth: 1.5, borderColor: colors.ink },
   unlimitedText: { ...type.caption, fontWeight: "600", color: colors.ink },
-  customBuy: { height: 48, borderRadius: radius.sm, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  customBuyText: { ...type.label, fontWeight: "600", color: colors.accent },
+  customBuy: { height: 48, borderRadius: radius.sm, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center", marginTop: spacing.md },
+  customBuyText: { ...type.label, fontWeight: "600", color: colors.accent},
   foot: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: spacing.lg },
 });

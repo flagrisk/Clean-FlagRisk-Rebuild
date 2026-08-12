@@ -31,19 +31,19 @@ type Notif = {
 };
 
 const KIND: Record<string, { label: string; fg: string; bg: string; Icon: any }> = {
-  panic:            { label: "Emergency Alert", fg: "#EB5757", bg: "#FBD1CF", Icon: Siren },
+  panic:            { label: "Emergency Alert", fg: colors.riskHigh, bg: "#FBD1CF", Icon: Siren },
   trip_overdue:     { label: "Trip Watch",      fg: "#2F80ED", bg: "#D6E7FB", Icon: Car },
   trip_overdue_self:{ label: "Trip Watch",      fg: "#2F80ED", bg: "#D6E7FB", Icon: Car },
   trip_end:         { label: "Trip Watch",      fg: "#2F80ED", bg: "#D6E7FB", Icon: Car },
-  check_in:         { label: "Check-In",        fg: "#1C9D6B", bg: "#D2F0E3", Icon: ShieldCheck },
+  check_in:         { label: "Check-In",        fg: colors.safe, bg: "#D2F0E3", Icon: ShieldCheck },
   network_invite:   { label: "Network",         fg: "#9B51E0", bg: "#EADCFA", Icon: UserPlus },
   network_flag:     { label: "Network",         fg: "#9B51E0", bg: "#EADCFA", Icon: Users },
   comment:          { label: "Comment",         fg: "#9B51E0", bg: "#EADCFA", Icon: MessageSquare },
-  incident_nearby:  { label: "Nearby Risk",     fg: "#F2994A", bg: "#FDE7CF", Icon: MapPin },
+  incident_nearby:  { label: "Nearby Risk",     fg: colors.riskMedium, bg: "#FDE7CF", Icon: MapPin },
 };
 
 function kindMeta(kind: string) {
-  return KIND[kind] ?? { label: "Update", fg: "#828282", bg: "#EBEBEB", Icon: Bell };
+  return KIND[kind] ?? { label: "Update", fg: colors.textMuted, bg: "#EBEBEB", Icon: Bell };
 }
 
 function dayLabel(iso: string) {
@@ -188,12 +188,12 @@ export function NotificationsScreen() {
       </View>
 
       <View style={styles.searchWrap}>
-        <Search size={16} color="#9F9F9F" strokeWidth={2} />
+        <Search size={16} color="#8B8F96" strokeWidth={2} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search"
-          placeholderTextColor="#9F9F9F"
+          placeholderTextColor="#8B8F96"
           style={styles.searchInput}
         />
       </View>
@@ -326,13 +326,13 @@ const styles = StyleSheet.create({
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    height: 42, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
   },
   searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
 
   list: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: screenBottomPad },
-  dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginBottom: spacing.xs },
+  dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginBottom: spacing.xs },
 
   row: {
     flexDirection: "row", alignItems: "flex-start", gap: spacing.ms,
@@ -350,10 +350,10 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
-  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   menuTitle: { ...type.subheading, color: colors.ink, marginBottom: spacing.sm },
   menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.ms, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuText: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink },
@@ -370,6 +370,6 @@ const styles = StyleSheet.create({
   promptBtnText: { ...type.label, fontWeight: "600" },
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
-  emptyTitle: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: "#333333" },
-  emptySub: { fontSize: 10, lineHeight: 14, fontWeight: "400", color: "#333333", textAlign: "center", marginTop: 8, maxWidth: 220 },
+  emptyTitle: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: colors.ink },
+  emptySub: { fontSize: 10, lineHeight: 14, fontWeight: "400", color: colors.ink, textAlign: "center", marginTop: 8, maxWidth: 220 },
 });

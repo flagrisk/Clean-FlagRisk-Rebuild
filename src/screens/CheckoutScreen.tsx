@@ -9,6 +9,7 @@
 // ============================================================================
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
@@ -16,6 +17,13 @@ import { ArrowLeft, ShieldCheck, CreditCard, Lock } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { colors, radius, spacing, type } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 function naira(n: number) { return "NGN " + n.toLocaleString(); }
 
@@ -162,6 +170,7 @@ export function CheckoutScreen() {
 
       <View style={styles.footer}>
         <Pressable style={[styles.payBtn, paying && { opacity: 0.8 }]} onPress={pay} disabled={paying}>
+          <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
           {paying
             ? <ActivityIndicator color={colors.accent} />
             : <Text style={styles.payText}>Pay {naira(price)}</Text>}
@@ -180,7 +189,7 @@ const styles = StyleSheet.create({
 
   scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: spacing.lg },
 
-  summary: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md },
+  summary: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md },
   summaryHead: { flexDirection: "row", alignItems: "center", gap: spacing.ms },
   planChip: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   planName: { ...type.subheading, color: colors.ink },
@@ -192,7 +201,7 @@ const styles = StyleSheet.create({
   totalLabel: { ...type.label, fontWeight: "600", color: colors.ink },
   totalValue: { ...type.subheading, color: colors.ink },
 
-  sectionLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginTop: spacing.lg },
+  sectionLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginTop: spacing.lg },
   methodRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     backgroundColor: colors.bg, borderRadius: radius.md,
@@ -206,7 +215,7 @@ const styles = StyleSheet.create({
   trustText: { flex: 1, ...type.caption, color: colors.textMuted, lineHeight: 17 },
 
   footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.sm },
-  payBtn: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  payText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  payBtn: { height: 56, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  payText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   footNote: { ...type.caption, color: colors.textMuted, textAlign: "center" },
 });

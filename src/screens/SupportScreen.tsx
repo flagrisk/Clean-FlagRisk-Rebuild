@@ -14,6 +14,7 @@ import {
   FlatList, KeyboardAvoidingView, Modal, Platform, Pressable,
   StyleSheet, Text, TextInput, View,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ArrowLeft, Plus, MessageCircle } from "lucide-react-native";
@@ -21,13 +22,20 @@ import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
 
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
+
 type Ticket = {
   id: string; subject: string; status: string; updated_at: string;
   last_message: string | null; last_sender: string | null;
 };
 
 function statusMeta(s: string) {
-  if (s === "answered") return { label: "Answered", fg: "#1C9D6B", bg: "#D2F0E3" };
+  if (s === "answered") return { label: "Answered", fg: colors.safe, bg: "#D2F0E3" };
   if (s === "resolved") return { label: "Resolved", fg: colors.textMuted, bg: "#EBEBEB" };
   if (s === "closed") return { label: "Closed", fg: colors.textMuted, bg: "#EBEBEB" };
   return { label: "Open", fg: "#B26A12", bg: "#FDE7CF" };
@@ -141,7 +149,7 @@ export function SupportScreen() {
         />
       )}
 
-      <Pressable style={styles.fab} onPress={() => setComposeOpen(true)} hitSlop={10}>
+      <Pressable style={[styles.fab, { bottom: insets.bottom + spacing.xl }]} onPress={() => setComposeOpen(true)} hitSlop={10}>
         <Plus size={24} color="#FFFFFF" strokeWidth={2.4} />
       </Pressable>
 
@@ -158,19 +166,20 @@ export function SupportScreen() {
                 value={subject}
                 onChangeText={setSubject}
                 placeholder="Subject"
-                placeholderTextColor="#9F9F9F"
+                placeholderTextColor="#8B8F96"
               />
               <TextInput
                 style={[styles.input, styles.textarea]}
                 value={message}
                 onChangeText={setMessage}
                 placeholder="Tell us what happened"
-                placeholderTextColor="#9F9F9F"
+                placeholderTextColor="#8B8F96"
                 multiline
                 textAlignVertical="top"
               />
 
               <Pressable style={[styles.sendBtn, busy && { opacity: 0.7 }]} onPress={submit} disabled={busy}>
+                <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
                 <Text style={styles.sendText}>{busy ? "Sending" : "Send request"}</Text>
               </Pressable>
               <Pressable onPress={() => setComposeOpen(false)} hitSlop={8}>
@@ -200,7 +209,7 @@ const styles = StyleSheet.create({
   when: { ...type.caption, color: colors.textFaint, marginTop: 3 },
 
   fab: {
-    position: "absolute", right: spacing.gutter, bottom: spacing.xl,
+    position: "absolute", right: spacing.gutter,
     width: 48, height: 48, borderRadius: 24, backgroundColor: colors.ink,
     alignItems: "center", justifyContent: "center", ...elevation.card,
   },
@@ -208,23 +217,23 @@ const styles = StyleSheet.create({
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
   emptyTitle: { ...type.subheading, color: colors.ink },
   emptySub: { ...type.caption, color: colors.textMuted, textAlign: "center", lineHeight: 18 },
-  emptyBtn: { height: 48, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, marginTop: spacing.md },
-  emptyBtnText: { ...type.label, fontWeight: "600", color: colors.accent },
+  emptyBtn: { height: 48, borderRadius: radius.md, backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)", alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, marginTop: spacing.md },
+  emptyBtnText: { ...type.label, fontWeight: "600", color: colors.ink },
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
-  sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   sheetTitle: { ...type.heading, color: colors.ink },
   sheetSub: { ...type.caption, color: colors.textMuted, marginTop: 4 },
   input: {
-    height: 52, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
+    height: 52, borderRadius: radius.sm, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingHorizontal: spacing.md, ...type.body, color: colors.ink, marginTop: spacing.md,
   },
   textarea: { height: 130, paddingTop: spacing.ms },
-  sendBtn: { height: 52, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
-  sendText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  sendBtn: { height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
+  sendText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   cancel: { ...type.caption, fontWeight: "600", color: colors.textMuted, textAlign: "center", marginTop: spacing.md },
 });

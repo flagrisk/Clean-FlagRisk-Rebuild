@@ -9,6 +9,7 @@
 // ============================================================================
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as Contacts from "expo-contacts";
@@ -17,6 +18,13 @@ import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { DraggableSheet } from "../components/DraggableSheet";
 import { colors, radius, spacing, type, screenBottomPad } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 type Contact = { id: string; name: string; phone: string };
 
@@ -118,12 +126,12 @@ export function PhonebookScreen() {
       </View>
 
       <View style={styles.searchWrap}>
-        <Search size={16} color="#9F9F9F" strokeWidth={2} />
+        <Search size={16} color="#8B8F96" strokeWidth={2} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search contacts"
-          placeholderTextColor="#9F9F9F"
+          placeholderTextColor="#8B8F96"
           style={styles.searchInput}
         />
       </View>
@@ -186,6 +194,7 @@ export function PhonebookScreen() {
           subtitle="They are not on FlagRisk yet. Invite them, and they will join your circle once they accept."
         >
           <Pressable style={[styles.inviteBtn, sending && { opacity: 0.7 }]} onPress={sendInvite} disabled={sending}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Send size={17} color={colors.accent} strokeWidth={2.2} />
             <Text style={styles.inviteText}>{sending ? "Sending" : "Send invite"}</Text>
           </Pressable>
@@ -206,7 +215,7 @@ const styles = StyleSheet.create({
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    height: 42, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
   },
   searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
@@ -225,9 +234,9 @@ const styles = StyleSheet.create({
 
   inviteBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
-    height: 52, borderRadius: radius.md, backgroundColor: colors.ink, marginTop: spacing.md,
+    height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", marginTop: spacing.md,
   },
-  inviteText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  inviteText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   cancel: { ...type.caption, fontWeight: "600", color: colors.textMuted, textAlign: "center", marginTop: spacing.md },
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },

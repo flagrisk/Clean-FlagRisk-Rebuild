@@ -13,6 +13,7 @@
 // ============================================================================
 import { useCallback, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ArrowLeft, MapPin, Plus, Trash2, Home } from "lucide-react-native";
@@ -21,6 +22,13 @@ import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { DraggableSheet } from "../components/DraggableSheet";
 import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 type Place = { id: string; label: string };
 
@@ -125,7 +133,7 @@ export function SavedPlacesScreen() {
         />
       )}
 
-      <Pressable style={styles.fab} onPress={() => setAddOpen(true)} hitSlop={10}>
+      <Pressable style={[styles.fab, { bottom: insets.bottom + spacing.xl }]} onPress={() => setAddOpen(true)} hitSlop={10}>
         <Plus size={24} color="#FFFFFF" strokeWidth={2.4} />
       </Pressable>
 
@@ -142,9 +150,10 @@ export function SavedPlacesScreen() {
             value={label}
             onChangeText={setLabel}
             placeholder="Label, for example Home or Work"
-            placeholderTextColor="#9F9F9F"
+            placeholderTextColor="#8B8F96"
           />
           <Pressable style={[styles.saveBtn, busy && { opacity: 0.7 }]} onPress={addPlace} disabled={busy}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.saveText}>{busy ? "Saving" : "Save this place"}</Text>
           </Pressable>
         </DraggableSheet>
@@ -161,7 +170,7 @@ const styles = StyleSheet.create({
 
   explainer: {
     flexDirection: "row", gap: spacing.ms, alignItems: "flex-start",
-    backgroundColor: "#FAFAFA", borderRadius: radius.md,
+    backgroundColor: colors.bgElevated, borderRadius: radius.md,
     marginHorizontal: spacing.gutter, marginTop: spacing.lg, padding: spacing.md,
   },
   explainerIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
@@ -176,17 +185,17 @@ const styles = StyleSheet.create({
   removeBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
 
   fab: {
-    position: "absolute", right: spacing.gutter, bottom: spacing.xl,
+    position: "absolute", right: spacing.gutter,
     width: 48, height: 48, borderRadius: 24, backgroundColor: colors.ink,
     alignItems: "center", justifyContent: "center", ...elevation.card,
   },
 
   input: {
-    height: 52, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
+    height: 52, borderRadius: radius.sm, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingHorizontal: spacing.md, ...type.body, color: colors.ink, marginTop: spacing.md,
   },
-  saveBtn: { height: 52, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
-  saveText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  saveBtn: { height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
+  saveText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
   emptyTitle: { ...type.subheading, color: colors.ink },

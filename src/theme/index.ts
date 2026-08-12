@@ -16,7 +16,7 @@ export const lightColors = {
   bgSunken: "#F5F5F5",
   border: "#E0E0E0",
   borderStrong: "#CDCDCD",
-  accent: "#DDEE5B",
+  accent: "#D4FF24",
   accentText: "#16181D",
   accentOn: "#16181D",
   accentSecondary: "#16181D",
@@ -27,7 +27,7 @@ export const lightColors = {
   textFaint: "#CDCDCD",
   danger: "#EB5757",
   warning: "#F2994A",
-  safe: "#27AE60",
+  safe: "#1C9D6B",
   riskHigh: "#EB5757",
   riskMedium: "#F2994A",
   riskLow: "#5BEE6C",
@@ -169,3 +169,4 @@ export const colors = lightColors;
 export const glass = lightGlass;
 export const glow = lightGlow;
 export const gradients = lightGradients;
+

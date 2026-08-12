@@ -62,7 +62,7 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ true: colors.ink, false: "#CDCDCD" }}
+        trackColor={{ true: colors.ink, false: colors.borderStrong }}
         thumbColor="#FFFFFF"
       />
     </View>
@@ -174,10 +174,10 @@ const styles = StyleSheet.create({
 
   scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: spacing.xxl },
 
-  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginTop: spacing.lg, marginBottom: spacing.sm },
+  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginTop: spacing.lg, marginBottom: spacing.sm },
   groupHint: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: spacing.sm },
 
-  card: { backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md },
+  card: { backgroundColor: colors.bgElevated, borderRadius: radius.md, paddingHorizontal: spacing.md },
   row: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,

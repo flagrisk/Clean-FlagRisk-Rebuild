@@ -12,12 +12,12 @@
 //  2. The mockup hero is a photograph. incident_detail returns no media, so the
 //     hero is a category band. Evidence lives on reports, not incidents.
 //
-// Comments are designed but the backend does not exist yet: the section renders
-// its empty state and there is no composer, so nothing can silently fail.
+// Comments are live, backed by incident_comments and its three RPCs.
+// Media comes from incident_media, video first, then verified, then newest.
 // ============================================================================
 import { useCallback, useState } from "react";
 import {
-  ActivityIndicator, KeyboardAvoidingView, Linking, Platform, Pressable,
+  ActivityIndicator, Image, Linking, Modal, Pressable,
   ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,13 +25,14 @@ import { useFocusEffect, useRoute, useNavigation } from "@react-navigation/nativ
 import * as Location from "expo-location";
 import {
   ArrowLeft, ShieldCheck, Siren, Check, X, MessageSquare, Map as MapIcon, Send, Trash2,
-  Flame, Waves, Zap, Users, Car, ShieldAlert, TriangleAlert,
 } from "lucide-react-native";
+import { riskIcon } from "../riskIcons";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { compassDirection, reverseGeocode } from "../../lib/geo";
 import { MiniMap, type RefugePlace } from "../components/MiniMap";
 import { Avatar } from "../components/Avatar";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { colors, radius, spacing, type } from "../theme";
 
 type Detail = {
@@ -44,13 +45,6 @@ type Source = { title: string; uri: string };
 type Comment = {
   id: string; author_id: string; author_name: string; author_avatar: string | null;
   body: string; created_at: string; is_mine: boolean;
-};
-
-const CAT_ICON: Record<string, any> = {
-  fire_outbreak: Flame, flood: Waves, storm: Waves, electric_hazard: Zap,
-  protest: Users, traffic_jam: Car, robbery: ShieldAlert, kidnapping: ShieldAlert,
-  terrorism: ShieldAlert, vandalism: ShieldAlert, animal_threat: TriangleAlert,
-  earthquake: TriangleAlert,
 };
 
 const SAFETY_STEPS: Record<string, string[]> = {
@@ -112,6 +106,23 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
+// The player lives in its own component so it is only ever created with a real
+// video source. Calling useVideoPlayer("") on the screen itself threw during
+// render and blanked the whole screen, which is what happened on every incident
+// that had a photograph or no media at all.
+function HeroVideo({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (pl) => { pl.loop = true; pl.muted = true; pl.play(); });
+  return (
+    <VideoView
+      style={StyleSheet.absoluteFill}
+      player={player}
+      contentFit="cover"
+      allowsFullscreen
+      nativeControls
+    />
+  );
+}
+
 export function IncidentDetailScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
@@ -132,6 +143,9 @@ export function IncidentDetailScreen() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
+  const [media, setMedia] = useState<{ url: string; isVideo: boolean } | null>(null);
+  const [mediaState, setMediaState] = useState<"loading" | "ready" | "none">("loading");
+  const [viewer, setViewer] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data } = await supabase.rpc("incident_detail", { p_incident: incidentId });
@@ -169,12 +183,29 @@ export function IncidentDetailScreen() {
     } catch { setAdviceStatus("fallback"); }
   }, [incidentId]);
 
+  // Evidence lives on reports, not incidents. Take the newest verified one.
+  // Media attached to a report is always shown. Only media the checks have
+  // positively rejected is withheld, and that decision now lives in the SQL.
+  // Video wins over a photograph when both exist.
+  const loadMedia = useCallback(async () => {
+    setMediaState("loading");
+    try {
+      const { data } = await supabase.rpc("incident_media", { p_incident: incidentId });
+      const row = Array.isArray(data) && data[0] ? data[0] : null;
+      if (!row || !row.media_url) { setMediaState("none"); return; }
+      const signed = await supabase.storage.from("report-evidence").createSignedUrl(row.media_url, 3600);
+      if (!signed.data) { setMediaState("none"); return; }
+      setMedia({ url: signed.data.signedUrl, isVideo: !!row.is_video });
+      setMediaState("ready");
+    } catch (_e) { setMediaState("none"); }
+  }, [incidentId]);
+
   const loadComments = useCallback(async () => {
     const { data } = await supabase.rpc("incident_comments_list", { p_incident: incidentId, p_limit: 100 });
     setComments((data ?? []) as Comment[]);
   }, [incidentId]);
 
-  useFocusEffect(useCallback(() => { load(); loadComments(); }, [load, loadComments]));
+  useFocusEffect(useCallback(() => { load(); loadComments(); loadMedia(); }, [load, loadComments, loadMedia]));
 
   async function postComment() {
     const body = draft.trim();
@@ -187,7 +218,7 @@ export function IncidentDetailScreen() {
       const msg = m.includes("commenting_too_fast") ? "Please wait a moment before commenting again."
         : m.includes("comment_too_long") ? "That comment is too long. Keep it under 600 characters."
         : m.includes("empty_comment") ? "Write something first."
-        : "Your comment was not posted. Please try again.";
+        : m || "Your comment was not posted. Please try again.";
       return showAlert({ title: "Not posted", message: msg, tone: "error" });
     }
     setDraft("");
@@ -253,7 +284,7 @@ export function IncidentDetailScreen() {
   }
 
   const catLabel = d.category_id.replace(/_/g, " ");
-  const Icon = CAT_ICON[d.category_id] ?? TriangleAlert;
+  const Icon = riskIcon(d.category_id);
   const steps = stepsFor(d.category_id);
   const metaLine = [
     dist != null ? prettyDistance(dist) : distStatus === "unavailable" ? null : "Calculating distance",
@@ -265,7 +296,24 @@ export function IncidentDetailScreen() {
     <View style={styles.safe}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Icon size={56} color={colors.riskHigh} strokeWidth={1.6} />
+          {mediaState === "ready" && media ? (
+            media.isVideo ? (
+              <HeroVideo url={media.url} />
+            ) : (
+              <Pressable style={StyleSheet.absoluteFill} onPress={() => setViewer(media.url)}>
+                <Image source={{ uri: media.url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+              </Pressable>
+            )
+          ) : mediaState === "loading" ? (
+            <ActivityIndicator color={colors.riskHigh} />
+          ) : (
+            <Icon size={56} color={colors.riskHigh} strokeWidth={1.6} />
+          )}
+          {mediaState === "none" ? (
+            <View style={styles.noMediaTag}>
+              <Text style={styles.noMediaText}>No media was supplied</Text>
+            </View>
+          ) : null}
           <SafeAreaView style={styles.floatBackWrap} edges={["top"]}>
             <Pressable onPress={() => navigation.goBack()} style={styles.floatBack} hitSlop={8}>
               <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
@@ -341,7 +389,13 @@ export function IncidentDetailScreen() {
               <Siren size={17} color={colors.riskHigh} strokeWidth={2} />
               <Text style={[styles.actionGhostText, { color: colors.riskHigh }]}>Panic alarm</Text>
             </Pressable>
-            <Pressable style={styles.actionSolid} onPress={() => navigation.navigate("Report")}>
+            <Pressable
+              style={styles.actionSolid}
+              onPress={() => navigation.navigate("Main", {
+                screen: "Map",
+                params: { focusLat: d.latitude, focusLng: d.longitude, focusId: d.id },
+              })}
+            >
               <MapIcon size={17} color={colors.accent} strokeWidth={2} />
               <Text style={styles.actionSolidText}>Open on the map</Text>
             </Pressable>
@@ -399,7 +453,7 @@ export function IncidentDetailScreen() {
               value={draft}
               onChangeText={setDraft}
               placeholder="Add what you are seeing"
-              placeholderTextColor="#9F9F9F"
+              placeholderTextColor="#8B8F96"
               multiline
               maxLength={600}
               style={styles.cInput}
@@ -418,6 +472,13 @@ export function IncidentDetailScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
+        <Pressable style={styles.viewerWrap} onPress={() => setViewer(null)}>
+          {viewer ? <Image source={{ uri: viewer }} style={styles.viewerMedia} resizeMode="contain" /> : null}
+          <Text style={[styles.viewerHint, { bottom: insets.bottom + 32 }]}>Tap anywhere to close</Text>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -425,7 +486,16 @@ export function IncidentDetailScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
 
-  hero: { height: 240, backgroundColor: "#FBD1CF", alignItems: "center", justifyContent: "center" },
+  hero: { height: 240, backgroundColor: "#FBD1CF", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  noMediaTag: {
+    position: "absolute", bottom: spacing.md, alignSelf: "center",
+    backgroundColor: "rgba(1,1,20,0.62)", borderRadius: radius.pill,
+    paddingHorizontal: 14, paddingVertical: 6,
+  },
+  noMediaText: { ...type.caption, fontWeight: "600", color: "#FFFFFF" },
+  viewerWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.94)", alignItems: "center", justifyContent: "center" },
+  viewerMedia: { width: "100%", height: "80%" },
+  viewerHint: { ...type.caption, color: "rgba(255,255,255,0.6)", position: "absolute" },
   floatBackWrap: { position: "absolute", top: 0, left: spacing.gutter },
   floatBack: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: "#FFFFFF",
@@ -445,7 +515,7 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.xl, marginBottom: spacing.sm },
   sectionTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
 
-  card: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, gap: spacing.ms },
+  card: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, gap: spacing.ms },
   stepRow: { flexDirection: "row", gap: spacing.ms, alignItems: "flex-start" },
   stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
   stepNumText: { fontSize: 11, lineHeight: 14, fontWeight: "700", color: colors.accent },
@@ -465,9 +535,9 @@ const styles = StyleSheet.create({
   actionGhostText: { ...type.label, fontWeight: "600" },
   actionSolid: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    height: 52, borderRadius: radius.md, backgroundColor: colors.ink,
+    height: 52, borderRadius: radius.md, backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
   },
-  actionSolidText: { ...type.label, fontWeight: "600", color: colors.accent },
+  actionSolidText: { ...type.label, fontWeight: "600", color: colors.ink },
 
   prompt: { ...type.label, fontWeight: "500", color: colors.ink, textAlign: "center", marginBottom: spacing.md },
   confirmRow: { flexDirection: "row", gap: spacing.md },
@@ -491,7 +561,7 @@ const styles = StyleSheet.create({
 
   composer: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, marginTop: spacing.md },
   cInput: {
-    flex: 1, minHeight: 48, maxHeight: 120, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    flex: 1, minHeight: 48, maxHeight: 120, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingHorizontal: spacing.md, paddingVertical: 12,
     ...type.label, fontWeight: "400", color: colors.ink,
   },

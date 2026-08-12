@@ -17,6 +17,7 @@
 // ============================================================================
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
@@ -28,7 +29,15 @@ import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { Avatar } from "../components/Avatar";
 import { TRIP_TASK } from "../tasks/tripTask";
+import { SlideAction } from "../components/SlideAction";
 import { colors, radius, spacing, type, elevation } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 type Member = { member_id: string; display_name: string | null; avatar_url?: string | null };
 type Trip = {
@@ -128,6 +137,20 @@ export function TripWatchScreen() {
 
   async function startTrip() {
     if (starting) return;
+
+    // A trip nobody is watching cannot alert anyone when you go quiet, which is
+    // the whole point of the feature. Refuse rather than start a silent one.
+    if (selected.length === 0) {
+      showAlert({
+        title: "Choose who is watching",
+        message: members.length === 0
+          ? "Add someone to your network first. Trip Watch tells the people you choose when you stop checking in, so it needs at least one person."
+          : "Pick at least one person. Trip Watch tells them when you stop checking in, and without anyone chosen it cannot alert a soul.",
+        tone: "error",
+      });
+      return;
+    }
+
     let useInterval = interval;
     if (customIntervalOn) {
       const ci = parseInt(customInterval || "0", 10);
@@ -213,7 +236,9 @@ export function TripWatchScreen() {
       if (error) { showAlert({ title: "Could not check in", message: error.message, tone: "error" }); return; }
       showAlert({
         title: "Checked in",
-        message: wasEscalated ? "Your circle has been told you are safe." : "You are safe. Your circle will not be alarmed.",
+        message: wasEscalated
+          ? "The people watching this trip have been told you are safe."
+          : "You are safe. No one will be alerted.",
         tone: "success",
       });
       load();
@@ -286,7 +311,17 @@ export function TripWatchScreen() {
   // ---------------------------------------------------------------- ACTIVE --
   if (active) {
     const overdue = active.status === "overdue" || active.status === "escalated";
+    const escalated = active.status === "escalated";
     const last = active.last_check_in_at ? new Date(active.last_check_in_at) : new Date(active.started_at);
+    const watcherIds = active.recipient_ids ?? [];
+    const watchers = members.filter((m) => watcherIds.indexOf(m.member_id) >= 0);
+    const watcherNames = watchers.map((m) => m.display_name ?? "a contact");
+    const watcherLine =
+      watcherIds.length === 0
+        ? "No one is watching this trip"
+        : watcherNames.length > 0
+        ? watcherNames.join(", ")
+        : watcherIds.length + (watcherIds.length === 1 ? " person" : " people") + " watching";
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <Header title="Trip Watch" onBack={() => navigation.goBack()} />
@@ -304,12 +339,22 @@ export function TripWatchScreen() {
           {overdue ? (
             <View style={styles.warnCard}>
               <Text style={styles.warnTitle}>
-                {active.status === "escalated" ? "Your circle has been alerted" : "We have not heard from you"}
+                {escalated
+                  ? (watcherIds.length === 0
+                      ? "No one could be alerted"
+                      : watcherNames.length > 0
+                        ? watcherNames.join(", ") + (watcherNames.length === 1 ? " has been alerted" : " have been alerted")
+                        : "The people you chose have been alerted")
+                  : "We have not heard from you"}
               </Text>
               <Text style={styles.warnBody}>
-                {active.status === "escalated"
-                  ? "Check in to tell everyone you are safe."
-                  : "Check in now, or your circle will be alerted shortly."}
+                {escalated
+                  ? (watcherIds.length === 0
+                      ? "This trip was started without anyone to watch it, so no alert could be sent. End it and start again with someone chosen."
+                      : "Check in to tell them you are safe.")
+                  : (watcherIds.length === 0
+                      ? "No one is watching this trip, so no one will be told."
+                      : "Check in now, or " + watcherLine + " will be told shortly.")}
               </Text>
             </View>
           ) : null}
@@ -320,26 +365,34 @@ export function TripWatchScreen() {
           </View>
           <View style={styles.statusRow}>
             <View style={styles.statusIcon}><Users size={17} color={colors.ink} strokeWidth={2} /></View>
-            <Text style={styles.statusText}>
-              {active.recipient_ids.length} {active.recipient_ids.length === 1 ? "person" : "people"} notified
-            </Text>
+            <Text style={styles.statusText} numberOfLines={2}>{watcherLine}</Text>
           </View>
           <Text style={styles.statusMuted}>Last check-in {last.toLocaleTimeString()}</Text>
 
-          <View style={styles.pairRow}>
-            <Pressable style={[styles.pairBtn, { borderColor: colors.riskHigh }]} onPress={() => navigation.navigate("Panic")}>
-              <Siren size={17} color={colors.riskHigh} strokeWidth={2} />
-              <Text style={[styles.pairText, { color: colors.riskHigh }]}>Emergency</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.pairBtn, { borderColor: colors.safe }, checking && { opacity: 0.6 }]}
-              onPress={confirmSafe}
-              disabled={checking}
-            >
-              <Check size={17} color={colors.safe} strokeWidth={2.4} />
-              <Text style={[styles.pairText, { color: colors.safe }]}>{checking ? "Sending" : "Check-in"}</Text>
-            </Pressable>
-          </View>
+          {overdue ? (
+            <View style={{ marginTop: spacing.lg }}>
+              <SlideAction
+                label="Slide to check in"
+                committedLabel="Checked in"
+                onCommit={confirmSafe}
+                disabled={checking}
+               
+              />
+            </View>
+          ) : (
+            <Text style={styles.autoNote}>
+              Trip Watch is checking you in on its own. There is nothing to do unless it stops
+              hearing from you, and then it will ask.
+            </Text>
+          )}
+
+          <Pressable
+            style={[styles.pairBtn, { borderColor: colors.riskHigh, marginTop: spacing.md }]}
+            onPress={() => navigation.navigate("Panic")}
+          >
+            <Siren size={17} color={colors.riskHigh} strokeWidth={2} />
+            <Text style={[styles.pairText, { color: colors.riskHigh }]}>Emergency</Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -406,7 +459,7 @@ export function TripWatchScreen() {
                   onChangeText={setCustomInterval}
                   keyboardType="number-pad"
                   placeholder="Minutes, between 5 and 180"
-                  placeholderTextColor="#9F9F9F"
+                  placeholderTextColor="#8B8F96"
                 />
               ) : null}
 
@@ -423,6 +476,7 @@ export function TripWatchScreen() {
               </View>
 
               <Pressable style={styles.primaryBtn} onPress={() => setStep("review")}>
+                <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
                 <Text style={styles.primaryText}>Next</Text>
                 <ChevronRight size={18} color={colors.accent} strokeWidth={2.4} />
               </Pressable>
@@ -492,12 +546,24 @@ export function TripWatchScreen() {
                 </Text>
               ) : null}
 
+              {selected.length === 0 ? (
+                <Text style={styles.pickHint}>
+                  Pick at least one person above. Trip Watch has no one to tell until you do.
+                </Text>
+              ) : null}
               <Pressable
-                style={[styles.primaryBtn, starting && { opacity: 0.7 }]}
+                style={[styles.primaryBtn, (starting || selected.length === 0) && { opacity: 0.45 }]}
                 onPress={startTrip}
-                disabled={starting}
+                disabled={starting || selected.length === 0}
               >
-                <Text style={styles.primaryText}>{starting ? "Starting" : "Start Trip Watch"}</Text>
+                <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+                <Text style={styles.primaryText}>
+                  {starting
+                    ? "Starting"
+                    : selected.length === 0
+                      ? "Start Trip Watch"
+                      : "Start, telling " + selected.length + (selected.length === 1 ? " person" : " people")}
+                </Text>
               </Pressable>
             </>
           )}
@@ -517,12 +583,12 @@ const styles = StyleSheet.create({
   mapWrap: { height: 260, marginTop: spacing.md, overflow: "hidden" },
 
   sheet: {
-    flex: 1, backgroundColor: colors.bg,
+    flex: 1, backgroundColor: "#F6F6F8",
     borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     marginTop: -radius.lg, paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
     ...elevation.sheet,
   },
-  sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   sheetHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sheetTitle: { ...type.heading, color: colors.ink },
   sheetSub: { ...type.caption, color: colors.textMuted, marginTop: 4 },
@@ -533,7 +599,7 @@ const styles = StyleSheet.create({
 
   fieldRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
-    backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md, height: 56,
+    backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)", borderRadius: radius.md, paddingHorizontal: spacing.md, height: 56,
   },
   fieldIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   fieldText: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink },
@@ -545,11 +611,11 @@ const styles = StyleSheet.create({
   chipTextOn: { color: colors.accent, fontWeight: "600" },
 
   input: {
-    height: 48, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
+    height: 48, borderRadius: radius.sm, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingHorizontal: spacing.md, ...type.body, color: colors.ink, marginTop: spacing.sm,
   },
 
-  summaryCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  summaryCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
   summaryRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
@@ -568,21 +634,24 @@ const styles = StyleSheet.create({
   statusIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
   statusText: { ...type.label, fontWeight: "500", color: colors.ink },
   statusMuted: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+  autoNote: { ...type.caption, color: colors.textMuted, lineHeight: 18, marginTop: spacing.lg },
+  pickHint: { ...type.caption, color: colors.riskHigh, lineHeight: 17, marginTop: spacing.md },
 
   warnCard: { backgroundColor: "#FDE7CF", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.md },
   warnTitle: { ...type.label, fontWeight: "600", color: "#B26A12" },
   warnBody: { ...type.caption, color: "#B26A12", marginTop: 3, lineHeight: 17 },
 
-  pairRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
+  // Standalone in a column now, so no flex: it would grow to fill the leftover
+  // height instead of the width.
   pairBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    height: 52, borderRadius: radius.md, borderWidth: 1,
+    alignSelf: "stretch", flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 6, height: 52, borderRadius: radius.md, borderWidth: 1, backgroundColor: "transparent",
   },
   pairText: { ...type.label, fontWeight: "600" },
 
   primaryBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    height: 52, borderRadius: radius.md, backgroundColor: colors.ink, marginTop: spacing.xl,
+    height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", marginTop: spacing.xl,
   },
-  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 });

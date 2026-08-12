@@ -47,7 +47,7 @@ function sevBand(s: number | null) {
   if (s == null) return { label: "Unknown", fg: colors.textMuted, bg: "#EBEBEB" };
   if (s >= 0.7) return { label: "High", fg: colors.riskHigh, bg: "#FBD1CF" };
   if (s >= 0.4) return { label: "Medium", fg: "#B26A12", bg: "#FDE7CF" };
-  return { label: "Low", fg: "#1C9D6B", bg: "#D2F0E3" };
+  return { label: "Low", fg: colors.safe, bg: "#D2F0E3" };
 }
 
 export function NetworkFlagDetailScreen() {
@@ -174,7 +174,7 @@ export function NetworkFlagDetailScreen() {
         </Pressable>
 
         <Pressable style={styles.panicBtn} onPress={() => navigation.navigate("Panic")}>
-          <Siren size={19} color="#FFFFFF" strokeWidth={2} />
+          <Siren size={19} color={colors.riskHigh} strokeWidth={2} />
           <Text style={styles.panicText}>Activate panic alarm</Text>
         </Pressable>
       </ScrollView>
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   },
   circleNoteText: { ...type.caption, fontWeight: "600", color: colors.ink },
 
-  factCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  factCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
   factRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
@@ -213,14 +213,14 @@ const styles = StyleSheet.create({
 
   linkCard: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
-    backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg,
+    backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg,
   },
   linkTitle: { ...type.label, fontWeight: "600", color: colors.ink },
   linkSub: { ...type.caption, color: colors.textMuted, marginTop: 3 },
 
   panicBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
-    height: 52, borderRadius: radius.md, backgroundColor: colors.riskHigh, marginTop: spacing.lg,
+    height: 52, borderRadius: radius.md, backgroundColor: "transparent", borderWidth: 1, borderColor: colors.riskHigh, marginTop: spacing.lg,
   },
-  panicText: { ...type.bodyStrong, fontWeight: "600", color: "#FFFFFF" },
+  panicText: { ...type.bodyStrong, fontWeight: "600", color: colors.riskHigh },
 });

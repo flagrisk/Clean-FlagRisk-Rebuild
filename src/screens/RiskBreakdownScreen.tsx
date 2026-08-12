@@ -184,11 +184,11 @@ const styles = StyleSheet.create({
   shell: { flex: 1, justifyContent: "flex-end" },
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,1,20,0.34)" },
   drawer: {
-    maxHeight: "88%", backgroundColor: colors.bg,
+    maxHeight: "88%", backgroundColor: "#F6F6F8",
     borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     paddingTop: spacing.sm, ...elevation.sheet,
   },
-  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   drawerTitle: { ...type.title, color: colors.ink, textAlign: "center", marginBottom: spacing.sm },
   empty: { ...type.body, color: colors.textMuted, textAlign: "center", marginTop: 60, paddingHorizontal: spacing.xl },
 
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
   freshNote: { ...type.caption, color: colors.textMuted, marginTop: 6 },
   more: { ...type.caption, color: colors.textMuted, marginTop: 2, marginBottom: spacing.sm },
 
-  howCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
+  howCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
   howHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
   howTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
   howText: { ...type.caption, color: colors.textMuted, lineHeight: 18 },

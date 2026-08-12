@@ -17,14 +17,55 @@ import { supabase } from "../../lib/supabase";
 import { useRiskCache } from "../theme/RiskCache";
 import { RiskGauge } from "../components/RiskGauge";
 import {
-  Siren, UsersRound, Bell, Navigation, ArrowUpRight, ChevronRight,
+  Siren, Bell, Navigation, ArrowUpRight, ChevronRight, ArrowRight,
   TriangleAlert, ShieldCheck, Car, UserPlus, MapPin,
 } from "lucide-react-native";
 import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
+import { riskIcon } from "../riskIcons";
+import { humanize } from "../format";
 
 const CANVAS = "#F5F5FA";
-const TILE_GRAD = ["#FFFFFF", "#DEDEDE"] as const;
+// Measured off the mock at its TRUE bounds: the tile is 608 x 608, square.
+// Two earlier attempts measured only the top 60 percent, because the gradient
+// passes through the page colour partway down and the detector stopped there.
+//
+// On the real tile the white edge runs from x 0.83 at the top to x 0.08 at the
+// bottom, so the transition line crosses the middle corner to corner. Sampled
+// along that line the mock reads:
+//   t 0.40 #FFFFFF   t 0.50 #FBFBFB   t 0.60 #F5F5F5
+//   t 0.70 #EEEEEE   t 0.80 #E7E7E7   t 0.90 #E0E0E0
+// Deliberately deeper than the mock, which measures #DDDDDD at the corner. On a
+// handset at everyday brightness that reads as flat, so the corner goes to
+// #B0B0B0 and the midpoint follows it down. The diagonal and its position are
+// unchanged: white to 45 percent, transition through the middle of the tile.
+const TILE_GRAD = ["#FFFFFF", "#FFFFFF", "#DCDCDC", "#B0B0B0"] as const;
 const CHIP_BG = "#EBEBEB";
+
+// The radius the score explanation is read at. The card, the drawer and the
+// factors line all use this one number so they cannot drift apart.
+const RISK_RADIUS_KM = 1;
+
+// The risk card grades continuously with the score: lime at rest, through amber,
+// to full red. Three buckets would step; this reads as one ramp, which is what a
+// score of 0 to 100 deserves.
+// Lime is lifted toward white because at full strength it dominates the card.
+// Amber and red stay as they are: a rising score should read as rising, and
+// paling the top of the ramp would flatten it.
+const TINT_LOW = [0xF0, 0xF7, 0xB5];
+const TINT_MID = [0xF2, 0x99, 0x4A];
+const TINT_HIGH = [0xEB, 0x57, 0x57];
+
+function mix(a: number[], b: number[], t: number) {
+  const v = a.map((c, i) => Math.round(c + (b[i] - c) * t));
+  return "#" + v.map((c) => c.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function riskTint(score: number) {
+  const s = Math.max(0, Math.min(100, score));
+  return s <= 50
+    ? mix(TINT_LOW, TINT_MID, s / 50)
+    : mix(TINT_MID, TINT_HIGH, (s - 50) / 50);
+}
 
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -62,24 +103,24 @@ function SectionHead({ title, onPress }: { title: string; onPress: () => void })
 }
 
 function Tile({
-  title, value, caption, Icon, onPress, badge,
+  title, value, onPress, badge,
 }: {
-  title: string; value: string; caption: string;
-  Icon: any; onPress: () => void; badge?: number;
+  title: string; value: string; onPress: () => void; badge?: number;
 }) {
   return (
     <Pressable onPress={onPress} style={styles.tileWrap}>
-      <LinearGradient colors={TILE_GRAD} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.tile}>
-        <View style={styles.tileTop}>
-          <View style={styles.tileGlyph}>
-            <Icon size={18} color={colors.ink} strokeWidth={2} />
-          </View>
-          <ArrowUpRight size={20} color={colors.ink} strokeWidth={2.2} />
-        </View>
-        <View>
-          <Text style={styles.tileTitle}>{title}</Text>
+      <LinearGradient
+        colors={TILE_GRAD}
+        locations={[0, 0.45, 0.7, 1]}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.tile}
+      >
+        <Text style={styles.tileTitle}>{title}</Text>
+        <View style={styles.tileFoot}>
           <Text style={styles.tileValue}>{value}</Text>
-          <Text style={styles.tileCaption}>{caption}</Text>
+          <View style={styles.tileArrow}>
+            <ArrowRight size={20} color={colors.ink} strokeWidth={2} />
+          </View>
         </View>
         {badge && badge > 0 ? (
           <View style={styles.tileBadge}><Text style={styles.tileBadgeText}>{badge}</Text></View>
@@ -105,6 +146,26 @@ export function DashboardScreen() {
   const [pendingRequests, setPendingRequests] = useState(0);
   const [activePanics, setActivePanics] = useState(0);
   const [unread, setUnread] = useState(0);
+  const [tier, setTier] = useState<string>(cp?.tier ?? "basic");
+  const [factors, setFactors] = useState<string[]>([]);
+
+  // The factors come from risk_score_explained, the same function the Risk
+  // Summary drawer reads, so the card and the drawer can never disagree.
+  const loadFactors = useCallback(async (wkt: string) => {
+    try {
+      const { data } = await supabase.rpc("risk_score_explained", {
+        p_location: wkt, p_radius_km: RISK_RADIUS_KM,
+      });
+      const list = data && data.factors ? data.factors : [];
+      const seen: string[] = [];
+      for (const f of list) {
+        if (!f || !f.category_id) continue;
+        if (seen.indexOf(f.category_id) < 0) seen.push(f.category_id);
+        if (seen.length === 3) break;
+      }
+      setFactors(seen);
+    } catch (_e) { setFactors([]); }
+  }, []);
   const [fetched, setFetched] = useState(false);
   const [consentVisible, setConsentVisible] = useState(false);
   const loaded = fetched || cache.score != null;
@@ -133,6 +194,7 @@ export function DashboardScreen() {
       else if (u.user?.email) setName(u.user.email.split("@")[0]);
       if (prof?.current_risk_score != null) setScore(Number(prof.current_risk_score));
       if (prof?.current_risk_band) setBand(prof.current_risk_band);
+      if (prof?.current_tier) setTier(prof.current_tier);
       setFetched(true);
       if (prof?.current_risk_score != null && prof?.current_risk_band)
         cache.setRisk(Number(prof.current_risk_score), prof.current_risk_band);
@@ -177,6 +239,7 @@ export function DashboardScreen() {
             setScore(Number(refreshed.current_risk_score)); setBand(refreshed.current_risk_band);
             cache.setRisk(Number(refreshed.current_risk_score), refreshed.current_risk_band);
           }
+          loadFactors(wkt);
         }
       } catch { /* location optional */ }
     })();
@@ -206,6 +269,7 @@ export function DashboardScreen() {
           setScore(Number(refreshed.current_risk_score)); setBand(refreshed.current_risk_band);
           cache.setRisk(Number(refreshed.current_risk_score), refreshed.current_risk_band);
         }
+        loadFactors(wkt);
       } catch { /* skip this tick */ }
       running = false;
     };
@@ -214,21 +278,29 @@ export function DashboardScreen() {
   }, []));
 
   const bandKey = (band ?? "low").toLowerCase();
-  const heroTint =
-    !loaded ? "#EDEDED"
-      : bandKey === "high" ? "#F0D5D4"
-      : bandKey === "medium" ? "#F4E2CC"
-      : "#D9F2DC";
+  const heroTint = loaded ? riskTint(score ?? 0) : "#EDEDED";
+
   const heroLine =
     !loaded ? "Reading the risk around you."
       : bandKey === "high" ? "Your area has elevated community reported risks."
       : bandKey === "medium" ? "There is some reported activity around you."
       : "No significant reported activity around you right now.";
 
+  // Nearby Risks answers one question: what is around me right now. A risk 200 km
+  // away is not that, whatever the plan allows, so this list is capped at 10 km
+  // for everyone. The cap never widens a plan: a Basic account still stops at its
+  // own 5 km. Plan reach continues to govern everywhere else, the map, alerting
+  // and the tier notice included.
+  const NEARBY_CAP_KM = 10;
+  const planKm =
+    tier === "premium" ? 500 : tier === "pro" ? 50 : tier === "standard" ? 15 : 5;
+  const reachKm = Math.min(planKm, NEARBY_CAP_KM);
+
   const nearest = pos
     ? nearby
       .filter((i) => i.latitude != null && i.longitude != null)
       .map((i) => ({ ...i, _m: metresBetween(pos.lat, pos.lng, i.latitude, i.longitude) }))
+      .filter((i) => i._m <= reachKm * 1000)
       .sort((a, b) => a._m - b._m)
       .slice(0, 2)
     : [];
@@ -246,7 +318,7 @@ export function DashboardScreen() {
               <Bell size={19} color={colors.ink} strokeWidth={2} />
               {unread > 0 ? <View style={styles.headPip} /> : null}
             </Pressable>
-            <Pressable onPress={() => navigation.navigate("Report")} style={styles.headBtn} hitSlop={8}>
+            <Pressable onPress={() => navigation.navigate("Map")} style={styles.headBtn} hitSlop={8}>
               <Navigation size={18} color={colors.ink} strokeWidth={2} />
             </Pressable>
           </View>
@@ -259,42 +331,43 @@ export function DashboardScreen() {
             >
               <View style={styles.heroHead}>
                 <Text style={styles.heroLabel}>Your risk level</Text>
-                <Pressable style={styles.livePill} onPress={() => navigation.navigate("Report")}>
+                <Pressable style={styles.livePill} onPress={() => navigation.navigate("Map")}>
                   <Text style={styles.livePillText}>LIVE MAP</Text>
                   <ChevronRight size={14} color={colors.ink} strokeWidth={2.4} />
                 </Pressable>
               </View>
 
               <Pressable
-                onPress={() => coords && navigation.navigate("RiskBreakdown", { location: coords, radiusKm: 1 })}
+                onPress={() => coords && navigation.navigate("RiskBreakdown", { location: coords, radiusKm: RISK_RADIUS_KM })}
                 style={{ alignItems: "center" }}
               >
                 <RiskGauge score={score ?? 0} size={228} showLabel={loaded} />
                 <Text style={styles.heroLine}>{heroLine}</Text>
+                {factors.length > 0 ? (
+                  <Text style={styles.heroFactors} numberOfLines={2}>
+                    Factors: {factors.map((f) => humanize(f)).join(", ")}
+                  </Text>
+                ) : null}
               </Pressable>
             </LinearGradient>
           </View>
 
           <View style={styles.tileRow}>
             <Tile
-              title="Alarm"
-              Icon={Siren}
+              title={"Emergency\nAlarm"}
               value={String(activePanics)}
-              caption={activePanics === 1 ? "active alarm" : "active alarms"}
               badge={activePanics}
-              onPress={() => navigation.navigate("PanicInbox")}
+              onPress={() => navigation.navigate("Panic")}
             />
             <Tile
-              title="Network"
-              Icon={UsersRound}
+              title={"Network\nMembers"}
               value={networkCount + " of 7"}
-              caption={pendingRequests > 0 ? "invite waiting" : "in your circle"}
               badge={pendingRequests}
               onPress={() => navigation.navigate("Network")}
             />
           </View>
 
-          <SectionHead title="Nearby Risks" onPress={() => navigation.navigate("Report")} />
+          <SectionHead title="Nearby Risks" onPress={() => navigation.navigate("Map")} />
           {nearest.length === 0 ? (
             <View style={styles.card}>
               <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
@@ -313,12 +386,17 @@ export function DashboardScreen() {
                 style={styles.card}
               >
                 <View style={[styles.rowIcon, { backgroundColor: CHIP_BG }]}>
-                  <TriangleAlert
-                    size={18}
-                    strokeWidth={2}
-                    color={i.severity === "critical" || i.severity === "high" ? colors.riskHigh
-                      : i.severity === "moderate" ? colors.riskMedium : colors.textMuted}
-                  />
+                  {(() => {
+                    const RIcon = riskIcon(i.category_id);
+                    return (
+                      <RIcon
+                        size={18}
+                        strokeWidth={2}
+                        color={i.severity === "critical" || i.severity === "high" ? colors.riskHigh
+                          : i.severity === "moderate" ? colors.riskMedium : colors.textMuted}
+                      />
+                    );
+                  })()}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
@@ -388,7 +466,7 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: spacing.gutter, paddingBottom: screenBottomPad },
 
   header: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingTop: spacing.sm, marginBottom: spacing.md },
-  hello: { ...type.heading, color: colors.inkDeep },
+  hello: { ...type.subheading, color: colors.inkDeep },
   headBtn: {
     width: 40, height: 40, borderRadius: 20, backgroundColor: "#FEFEFE",
     alignItems: "center", justifyContent: "center", ...elevation.hairline,
@@ -405,23 +483,28 @@ const styles = StyleSheet.create({
     paddingLeft: 12, paddingRight: 6, paddingVertical: 6, backgroundColor: "rgba(255,255,255,0.55)",
   },
   livePillText: { fontSize: 12, lineHeight: 16, fontWeight: "700", color: colors.ink, letterSpacing: 0.4 },
-  heroLine: { ...type.caption, color: "#333333", textAlign: "center", marginTop: 4, maxWidth: 250 },
+  heroLine: { ...type.caption, color: colors.ink, textAlign: "center", marginTop: 4, maxWidth: 250 },
+  heroFactors: {
+    ...type.caption, fontWeight: "600", color: colors.ink,
+    textAlign: "center", marginTop: 6, maxWidth: 260,
+  },
 
   tileRow: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.xs },
+  // The tile starts white and the canvas is #F5F5FA, so without an edge the top
+  // left corner dissolves into the page. A hairline defines it without weight.
   tileWrap: {
-    flex: 1, borderRadius: radius.md, overflow: "hidden",
-    borderWidth: 1, borderColor: "rgba(20,21,42,0.10)", ...elevation.card,
+    flex: 1, borderRadius: radius.lg, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
+    ...elevation.card,
   },
-  tile: { height: 158, padding: spacing.md, justifyContent: "space-between" },
-  tileTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-  tileGlyph: {
-    width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.85)",
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(20,21,42,0.08)",
+  tile: { height: 168, padding: spacing.md, justifyContent: "space-between" },
+  tileTitle: { ...type.subheading, color: colors.ink, lineHeight: 23 },
+  tileFoot: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" },
+  tileValue: { fontSize: 22, lineHeight: 28, fontWeight: "500", color: colors.ink },
+  tileArrow: {
+    width: 46, height: 46, borderRadius: 23, backgroundColor: "#FFFFFF",
+    alignItems: "center", justifyContent: "center", ...elevation.hairline,
   },
-  tileTitle: { ...type.label, fontWeight: "600", color: colors.ink },
-  tileValue: { ...type.heading, color: colors.ink, marginTop: 2 },
-  tileCaption: { ...type.caption, color: colors.textMuted },
   tileBadge: {
     position: "absolute", top: 12, right: 44, minWidth: 22, height: 22, borderRadius: 11,
     paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.riskHigh,

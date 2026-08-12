@@ -9,10 +9,11 @@
 // ============================================================================
 import { useCallback, useMemo, useState } from "react";
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
-  ArrowLeft, EllipsisVertical, Search, Plus, Pencil, AtSign, BookUser,
+  ArrowLeft, EllipsisVertical, Plus, Pencil, AtSign, BookUser,
   ShieldPlus, ShieldMinus, UserMinus, Clock3, X,
 } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
@@ -21,6 +22,13 @@ import { Avatar } from "../components/Avatar";
 import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
 import { DraggableSheet } from "../components/DraggableSheet";
 import { PhoneInput } from "../components/PhoneInput";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 const MAX_MEMBERS = 7;
 
@@ -35,7 +43,6 @@ export function NetworkScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [pending, setPending] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState("");
   const [chooserOpen, setChooserOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [addMode, setAddMode] = useState<"manual" | "email">("manual");
@@ -141,11 +148,7 @@ export function NetworkScreen() {
     });
   }
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter((m) => (m.display_name ?? "").toLowerCase().includes(q));
-  }, [members, query]);
+  const shown = members;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -162,17 +165,6 @@ export function NetworkScreen() {
           <EllipsisVertical size={18} color={colors.ink} strokeWidth={2} />
           {inviteCount > 0 ? <View style={styles.headPip} /> : null}
         </Pressable>
-      </View>
-
-      <View style={styles.searchWrap}>
-        <Search size={16} color="#9F9F9F" strokeWidth={2} />
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search"
-          placeholderTextColor="#9F9F9F"
-          style={styles.searchInput}
-        />
       </View>
 
       <View style={styles.divider} />
@@ -239,7 +231,7 @@ export function NetworkScreen() {
       )}
 
       <Pressable
-        style={[styles.fab, full && { opacity: 0.4 }]}
+        style={[styles.fab, { bottom: insets.bottom + screenBottomPad }, full && { opacity: 0.4 }]}
         onPress={openChooser}
         hitSlop={10}
       >
@@ -305,7 +297,7 @@ export function NetworkScreen() {
               value={name}
               onChangeText={setName}
               placeholder="Name (optional)"
-              placeholderTextColor="#9F9F9F"
+              placeholderTextColor="#8B8F96"
             />
           ) : null}
           {addMode === "email" ? (
@@ -314,7 +306,7 @@ export function NetworkScreen() {
               value={email}
               onChangeText={setEmail}
               placeholder="Email address"
-              placeholderTextColor="#9F9F9F"
+              placeholderTextColor="#8B8F96"
               autoCapitalize="none"
               keyboardType="email-address"
             />
@@ -324,6 +316,7 @@ export function NetworkScreen() {
             </View>
           )}
           <Pressable style={[styles.primaryBtn, adding && { opacity: 0.7 }]} onPress={addMember} disabled={adding}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.primaryBtnText}>{adding ? "Sending" : "Add contact"}</Text>
           </Pressable>
         </DraggableSheet>
@@ -341,13 +334,7 @@ const styles = StyleSheet.create({
   headPip: { position: "absolute", top: 7, right: 7, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.riskHigh },
   headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
 
-  searchWrap: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
-    marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
-  },
-  searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
-  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: spacing.gutter, marginTop: spacing.md },
+  divider: { height: 1, backgroundColor: colors.border, marginHorizontal: spacing.gutter, marginTop: spacing.lg },
   countLine: { ...type.caption, color: colors.textMuted, marginHorizontal: spacing.gutter, marginTop: spacing.sm },
 
   inviteBanner: {
@@ -357,7 +344,7 @@ const styles = StyleSheet.create({
   inviteBannerText: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center" },
 
   list: { paddingHorizontal: spacing.gutter, paddingTop: spacing.md, paddingBottom: screenBottomPad },
-  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333" },
+  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.ms },
   pendingAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
   rowName: { ...type.label, color: "#000000" },
@@ -369,7 +356,7 @@ const styles = StyleSheet.create({
   emptySub: { ...type.caption, color: colors.textMuted, marginTop: 6 },
 
   fab: {
-    position: "absolute", right: spacing.gutter, bottom: screenBottomPad,
+    position: "absolute", right: spacing.gutter,
     width: 48, height: 48, borderRadius: 24, backgroundColor: colors.ink,
     alignItems: "center", justifyContent: "center", ...elevation.card,
   },
@@ -377,12 +364,12 @@ const styles = StyleSheet.create({
   sheetRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md },
   sheetText: { ...type.body, fontWeight: "500", color: colors.ink },
   input: {
-    height: 52, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    height: 52, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingHorizontal: spacing.md, ...type.body, color: colors.ink, marginTop: spacing.md,
   },
   primaryBtn: {
-    height: 52, borderRadius: radius.md, backgroundColor: colors.ink,
+    height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden",
     alignItems: "center", justifyContent: "center", marginTop: spacing.lg,
   },
-  primaryBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  primaryBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.ink },
 });

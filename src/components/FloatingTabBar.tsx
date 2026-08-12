@@ -14,8 +14,8 @@ import { House, Inbox, Files, CircleUserRound, Plus, Minus } from "lucide-react-
 import type { LucideIcon } from "lucide-react-native";
 import { colors, elevation } from "../theme";
 
-const BAR_BG = "#F5F5F5";
-const INACTIVE = "#828282";
+const BAR_BG = colors.bgSunken;
+const INACTIVE = colors.textMuted;
 
 const TABS: { name: string; label: string; Icon: LucideIcon }[] = [
   { name: "Home", label: "Home", Icon: House },
@@ -45,6 +45,7 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
         <Text style={[styles.label, { fontWeight: focused ? "600" : "400" }]} numberOfLines={1}>
           {label}
         </Text>
+        {focused ? <View style={styles.underline} /> : null}
       </Pressable>
     );
   };
@@ -65,8 +66,8 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
       >
         <View style={styles.centreDisc}>
           {onMap
-            ? <Minus size={24} color="#FFFFFF" strokeWidth={2.6} />
-            : <Plus size={24} color="#FFFFFF" strokeWidth={2.4} />}
+            ? <Minus size={24} color={colors.accent} strokeWidth={2.6} />
+            : <Plus size={24} color={colors.accent} strokeWidth={2.4} />}
         </View>
       </Pressable>
     </View>
@@ -82,7 +83,8 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between",
     paddingHorizontal: 25,
   },
-  tab: { width: 56, height: 40, alignItems: "center", justifyContent: "flex-start", gap: 4 },
+  tab: { width: 56, height: 46, alignItems: "center", justifyContent: "flex-start", gap: 3 },
+  underline: { width: 34, height: 2, borderRadius: 1, backgroundColor: colors.ink, marginTop: 3 },
   label: { fontSize: 10, lineHeight: 14, color: colors.ink },
   centreSlot: { width: 56 },
   centrePress: { position: "absolute", alignSelf: "center", top: -13 },

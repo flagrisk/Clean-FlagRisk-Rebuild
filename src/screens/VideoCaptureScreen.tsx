@@ -49,7 +49,12 @@ export function VideoCaptureScreen() {
     }, 1000);
     try {
       // capped at MAX_SECONDS at the source; the camera stops itself.
-      const video = await cameraRef.current.recordAsync({ maxDuration: MAX_SECONDS });
+      // Cap the file as well as the duration. Without this a 10 second clip can
+      // be 20 MB on a high bitrate device, which no one on mobile data will wait for.
+      const video = await cameraRef.current.recordAsync({
+        maxDuration: MAX_SECONDS,
+        maxFileSize: 6 * 1024 * 1024,
+      });
       if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
       setRecording(false);
       if (video?.uri) await upload(video.uri);
@@ -124,7 +129,7 @@ export function VideoCaptureScreen() {
       </View>
 
       <View style={styles.cameraWrap}>
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode="video" facing="back" />
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} mode="video" facing="back" videoQuality="720p" />
         {uploading && (
           <View style={styles.overlay}>
             <Text style={styles.overlayText}>Uploading evidence</Text>

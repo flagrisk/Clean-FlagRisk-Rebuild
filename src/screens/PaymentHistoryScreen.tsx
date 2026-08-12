@@ -19,7 +19,7 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 function statusMeta(s: string) {
-  if (s === "succeeded") return { label: "Paid", fg: "#1C9D6B", bg: "#D2F0E3" };
+  if (s === "succeeded") return { label: "Paid", fg: colors.safe, bg: "#D2F0E3" };
   if (s === "refunded") return { label: "Refunded", fg: "#B26A12", bg: "#FDE7CF" };
   if (s === "failed") return { label: "Failed", fg: colors.riskHigh, bg: "#FBD1CF" };
   if (s === "pending") return { label: "Pending", fg: colors.textMuted, bg: "#EBEBEB" };

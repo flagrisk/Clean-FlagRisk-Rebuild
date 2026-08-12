@@ -9,6 +9,7 @@
 // ============================================================================
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { ArrowLeft } from "lucide-react-native";
@@ -16,6 +17,13 @@ import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { AuthInput } from "../components/AuthInput";
 import { colors, radius, spacing, type } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 function strengthOf(pw: string) {
   if (!pw) return { score: 0, label: "", tone: colors.border };
@@ -100,6 +108,7 @@ export function ChangePasswordScreen() {
 
         <View style={styles.footer}>
           <Pressable style={[styles.cta, busy && { opacity: 0.7 }]} onPress={save} disabled={busy}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.ctaText}>{busy ? "Saving" : "Update password"}</Text>
           </Pressable>
           <Pressable onPress={sendReset} hitSlop={8}>
@@ -127,7 +136,11 @@ const styles = StyleSheet.create({
   mismatch: { ...type.caption, color: colors.riskHigh, marginTop: spacing.sm },
 
   footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.md },
-  cta: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  cta: {
+    height: 56, borderRadius: radius.md,
+    backgroundColor: "transparent", overflow: "hidden",
+    alignItems: "center", justifyContent: "center",
+  },
+  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   resetLink: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center" },
 });

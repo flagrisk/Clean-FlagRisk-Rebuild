@@ -56,12 +56,12 @@ export function HelpScreen() {
       </View>
 
       <View style={styles.searchWrap}>
-        <Search size={16} color="#9F9F9F" strokeWidth={2} />
+        <Search size={16} color="#8B8F96" strokeWidth={2} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search help"
-          placeholderTextColor="#9F9F9F"
+          placeholderTextColor="#8B8F96"
           style={styles.searchInput}
         />
       </View>
@@ -118,26 +118,26 @@ const styles = StyleSheet.create({
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    height: 42, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
   },
   searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
   loading: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: spacing.xl },
 
-  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginTop: spacing.md },
+  groupLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginTop: spacing.md },
   row: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   rowTitle: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink, lineHeight: 20 },
 
-  footerCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.xl },
+  footerCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.xl },
   footerTitle: { ...type.label, fontWeight: "600", color: colors.ink },
   footerSub: { ...type.caption, color: colors.textMuted, marginTop: 3 },
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
   emptyTitle: { ...type.subheading, color: colors.ink, textAlign: "center" },
   emptySub: { ...type.caption, color: colors.textMuted, textAlign: "center", lineHeight: 18 },
-  emptyBtn: { height: 48, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, marginTop: spacing.md },
-  emptyBtnText: { ...type.label, fontWeight: "600", color: colors.accent },
+  emptyBtn: { height: 48, borderRadius: radius.md, backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)", alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, marginTop: spacing.md },
+  emptyBtnText: { ...type.label, fontWeight: "600", color: colors.ink },
 });

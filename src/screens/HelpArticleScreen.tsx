@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   title: { ...type.title, color: colors.ink, lineHeight: 32 },
   body: { ...type.body, color: colors.ink, lineHeight: 25, marginTop: spacing.md },
 
-  footerCard: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginTop: spacing.xxl },
+  footerCard: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.xxl },
   footerTitle: { ...type.label, fontWeight: "600", color: colors.ink },
   footerSub: { ...type.caption, color: colors.textMuted, marginTop: 3 },
 });

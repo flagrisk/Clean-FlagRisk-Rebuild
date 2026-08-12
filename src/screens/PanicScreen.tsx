@@ -15,24 +15,21 @@
 // ============================================================================
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Animated, Easing, PanResponder, Pressable,
+  ActivityIndicator, Animated, Easing, Pressable,
   ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as Location from "expo-location";
-import { ArrowLeft, History, ChevronRight, Check } from "lucide-react-native";
+import { ArrowLeft, History } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { Avatar } from "../components/Avatar";
 import { LocationConsentCard } from "../components/LocationConsentCard";
 import { colors, radius, spacing, type, elevation } from "../theme";
+import { SlideAction } from "../components/SlideAction";
 
 const DISC = 200;
-const TRACK_H = 48;
-const KNOB = 32;
-const TRACK_PAD = 8;
-const FIRE_AT = 0.85;   // fraction of travel that commits
 
 type Resp = {
   responder_id: string; responder_name: string; responder_avatar?: string | null;
@@ -47,77 +44,6 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-// ---------------------------------------------------------------------------
-// Slide control. Drag the knob past FIRE_AT to commit; release early to reset.
-// ---------------------------------------------------------------------------
-function SlideAction({
-  label, committedLabel, onCommit, disabled,
-}: { label: string; committedLabel: string; onCommit: () => void; disabled?: boolean }) {
-  const [done, setDone] = useState(false);
-  const [sliding, setSliding] = useState(false);
-  const x = useRef(new Animated.Value(0)).current;
-  const committed = useRef(false);
-  // The PanResponder is built once, so it must read travel from a ref. Reading
-  // it from state closed over 0 on first render, every release divided by zero,
-  // and the control never committed.
-  const travelRef = useRef(0);
-  const doneRef = useRef(false);
-  const disabledRef = useRef(!!disabled);
-  disabledRef.current = !!disabled;
-
-  const responder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => setSliding(true),
-      onPanResponderMove: (_e, g) => {
-        if (disabledRef.current || committed.current) return;
-        const t = travelRef.current;
-        x.setValue(Math.max(0, Math.min(t, g.dx)));
-      },
-      onPanResponderRelease: (_e, g) => {
-        setSliding(false);
-        if (disabledRef.current || committed.current) return;
-        const t = travelRef.current;
-        const v = Math.max(0, Math.min(t, g.dx));
-        if (t > 0 && v / t >= FIRE_AT) {
-          committed.current = true;
-          doneRef.current = true;
-          setDone(true);
-          Animated.timing(x, { toValue: t, duration: 120, useNativeDriver: false }).start(() => onCommit());
-        } else {
-          Animated.spring(x, { toValue: 0, useNativeDriver: false, bounciness: 6 }).start();
-        }
-      },
-      onPanResponderTerminate: () => {
-        setSliding(false);
-        Animated.spring(x, { toValue: 0, useNativeDriver: false, bounciness: 6 }).start();
-      },
-    })
-  ).current;
-
-  return (
-    <View
-      style={[styles.track, disabled && { opacity: 0.5 }]}
-      onLayout={(e) => {
-        travelRef.current = Math.max(0, e.nativeEvent.layout.width - KNOB - TRACK_PAD * 2);
-      }}
-    >
-      <Text style={styles.trackLabel} numberOfLines={1}>
-        {done ? committedLabel : sliding ? "Keep sliding" : label}
-      </Text>
-      <Animated.View
-        style={[styles.knob, { transform: [{ translateX: x }] }]}
-        {...responder.panHandlers}
-      >
-        {done
-          ? <Check size={18} color={colors.ink} strokeWidth={3} />
-          : <ChevronRight size={18} color={colors.ink} strokeWidth={3} />}
-      </Animated.View>
-    </View>
-  );
-}
-
 export function PanicScreen() {
   const navigation = useNavigation<any>();
   const [activated, setActivated] = useState(false);
@@ -126,16 +52,22 @@ export function PanicScreen() {
   const [firing, setFiring] = useState(false);
   const [responses, setResponses] = useState<Resp[]>([]);
   const [showLocNudge, setShowLocNudge] = useState(false);
+  const [ending, setEnding] = useState(false);
 
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
   const ring3 = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(0)).current;
 
+  const justEnded = useRef(0);
+
   useFocusEffect(useCallback(() => {
     let alive = true;
     (async () => {
       if (activated) return;
+      // A rehydrate that lands within a few seconds of ending one would put the
+      // alarm straight back on screen.
+      if (Date.now() - justEnded.current < 6000) return;
       const { data } = await supabase.rpc("my_active_alarm");
       if (alive && data && data[0]) {
         setAlarmId(data[0].alarm_id);
@@ -183,7 +115,7 @@ export function PanicScreen() {
     switch (v) {
       case "getting_help": return { label: "Getting help", color: "#D6E7FB", on: "#2F80ED" };
       case "on_way": case "responding": return { label: "On the way", color: "#FDE7CF", on: "#B26A12" };
-      case "marked_safe": return { label: "Safe", color: "#D2F0E3", on: "#1C9D6B" };
+      case "marked_safe": return { label: "Safe", color: "#D2F0E3", on: colors.safe };
       default: return { label: "Noted", color: "#EBEBEB", on: colors.textMuted };
     }
   }
@@ -236,9 +168,43 @@ export function PanicScreen() {
     }
   }
 
+  // Ending calls end_my_alarms, which closes EVERY active alarm this user owns
+  // and returns how many it closed. Two things made the old path fail:
+  //
+  //  1. end_sos took one id, and my_active_alarm only ever returns the newest.
+  //     A second alarm fired while one was live left the older one running, so
+  //     the screen cleared and the next focus found the other one and pulsed
+  //     again with no way to reach it.
+  //  2. end_sos matched on `status = active` and returned success even when it
+  //     matched nothing, so the client could not tell ending from silence.
+  //
+  // The screen now clears only on a confirmed count. If nothing was closed, or
+  // the call fails, the alarm stays on screen and says so. Believing an alarm is
+  // off when it is still live is the dangerous error.
   async function deactivate() {
-    if (alarmId) await supabase.rpc("end_sos", { p_alarm_id: alarmId, p_reason: "user_cancel" });
-    setActivated(false); setAlarmId(null); setSummary(null); setResponses([]);
+    if (ending) return;
+    setEnding(true);
+    try {
+      const { data, error } = await supabase.rpc("end_my_alarms", { p_reason: "user_cancel" });
+      if (error) throw error;
+      const closed = typeof data === "number" ? data : 0;
+      setEnding(false);
+      if (closed === 0) {
+        showAlert({
+          title: "Nothing to end",
+          message: "No alarm of yours is running. Pull the screen back to check.",
+        });
+      }
+      justEnded.current = Date.now();
+      setActivated(false); setAlarmId(null); setSummary(null); setResponses([]);
+    } catch (e) {
+      setEnding(false);
+      showAlert({
+        title: "Alarm is still running",
+        message: "We could not end it, so your circle can still see it. Check your connection and slide again.",
+        tone: "error",
+      });
+    }
   }
 
   const breatheScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] });
@@ -254,7 +220,9 @@ export function PanicScreen() {
         <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
       </Pressable>
       <Text style={styles.headTitle}>Alarm</Text>
-      <View style={{ width: 36 }} />
+      <Pressable onPress={() => navigation.navigate("PanicInbox")} style={styles.headBtnFilled} hitSlop={8}>
+        <History size={17} color={colors.ink} strokeWidth={2} />
+      </Pressable>
     </View>
   );
 
@@ -308,7 +276,20 @@ export function PanicScreen() {
         </View>
 
         <View style={styles.trackWrap}>
-          <SlideAction label="Slide to end alert" committedLabel="Alert ended" onCommit={deactivate} />
+          {/* The key matters. Both branches render a SlideAction at the same
+              position, so without distinct keys React reuses one instance and
+              its internal state survives the switch: after firing, `done` was
+              still true, the label read "Alert ended" instantly, and
+              `committed` blocked the pan responder so the control was dead and
+              the alarm could never be ended. */}
+          <SlideAction
+            key="end-alarm"
+            label="Slide to end alert"
+            committedLabel={ending ? "Ending" : "Alert ended"}
+            onCommit={deactivate}
+            disabled={ending}
+            autoReset={false}
+          />
         </View>
 
         <LocationConsentCard
@@ -338,20 +319,14 @@ export function PanicScreen() {
 
       <View style={{ flex: 1 }} />
 
-      <Pressable
-        onPress={() => navigation.navigate("PanicInbox")}
-        style={styles.historyBtn}
-        hitSlop={10}
-      >
-        <History size={19} color={colors.ink} strokeWidth={2} />
-      </Pressable>
-
       <View style={styles.trackWrap}>
         <SlideAction
+          key="fire-alarm"
           label="Slide to send emergency alert"
           committedLabel="Alert sent"
           onCommit={fireAlarm}
           disabled={firing}
+          autoReset={false}
         />
       </View>
     </SafeAreaView>
@@ -385,7 +360,7 @@ const styles = StyleSheet.create({
   },
 
   responsesWrap: { flex: 1, marginTop: spacing.xl, paddingHorizontal: spacing.gutter },
-  responsesTitle: { ...type.caption, fontWeight: "600", color: "#333333", marginBottom: spacing.sm },
+  responsesTitle: { ...type.caption, fontWeight: "600", color: colors.ink, marginBottom: spacing.sm },
   waitWrap: { alignItems: "center", paddingVertical: spacing.xl, gap: 8 },
   waitText: { ...type.label, color: colors.ink },
   waitSub: { ...type.caption, color: colors.textMuted, textAlign: "center", maxWidth: 240 },
@@ -398,22 +373,5 @@ const styles = StyleSheet.create({
   respPill: { borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 },
   respPillText: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
 
-  historyBtn: {
-    alignSelf: "flex-end", marginRight: spacing.gutter, marginBottom: spacing.md,
-    width: 48, height: 48, borderRadius: 24, backgroundColor: "#F0F0F0",
-    alignItems: "center", justifyContent: "center",
-  },
   trackWrap: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.lg, marginTop: spacing.lg },
-  track: {
-    height: TRACK_H, borderRadius: 64, backgroundColor: "#333333",
-    justifyContent: "center", paddingHorizontal: TRACK_PAD,
-  },
-  trackLabel: {
-    position: "absolute", left: 0, right: 0, textAlign: "center",
-    ...type.label, fontWeight: "600", color: "#FFFFFF",
-  },
-  knob: {
-    width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: colors.accent,
-    alignItems: "center", justifyContent: "center",
-  },
 });

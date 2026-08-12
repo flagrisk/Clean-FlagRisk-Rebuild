@@ -127,7 +127,7 @@ export function SupportThreadScreen() {
         </Pressable>
         <Text style={styles.headTitle} numberOfLines={1}>{subject}</Text>
         <Pressable onPress={toggleResolved} hitSlop={8} style={[styles.statusBtn, status === "resolved" && styles.statusBtnOn]}>
-          <Text style={[styles.statusBtnText, status === "resolved" && { color: colors.accent }]}>
+          <Text style={[styles.statusBtnText, status === "resolved" && { color: colors.ink }]}>
             {status === "resolved" ? "Resolved" : "Resolve"}
           </Text>
         </Pressable>
@@ -199,7 +199,7 @@ export function SupportThreadScreen() {
             value={text}
             onChangeText={setText}
             placeholder="Type a message"
-            placeholderTextColor="#9F9F9F"
+            placeholderTextColor="#8B8F96"
             multiline
             style={styles.input}
           />
@@ -218,18 +218,22 @@ const styles = StyleSheet.create({
   headBtnPlain: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   headTitle: { flex: 1, ...type.subheading, color: colors.ink },
   statusBtn: { borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 6 },
-  statusBtnOn: { backgroundColor: colors.ink, borderColor: colors.ink },
+  statusBtnOn: { backgroundColor: "#EDEDED", borderWidth: 1.5, borderColor: colors.ink },
   statusBtnText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.textMuted },
 
   bubble: { maxWidth: "84%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.md },
   bubbleMine: { backgroundColor: colors.ink, borderTopRightRadius: 4 },
-  bubbleTheirs: { backgroundColor: "#FAFAFA", borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4 },
+  bubbleTheirs: { backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4 },
   bubbleText: { ...type.label, fontWeight: "400", color: colors.ink, lineHeight: 21 },
   meta: { ...type.caption, color: colors.textFaint, marginTop: 4, marginHorizontal: 4 },
   attachGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
   attachImg: { width: 120, height: 120, borderRadius: radius.sm },
 
-  awaiting: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: spacing.lg, paddingHorizontal: spacing.lg, lineHeight: 17 },
+  awaiting: {
+    ...type.caption, color: colors.textMuted, textAlign: "center",
+    marginTop: spacing.lg, marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg, lineHeight: 17,
+  },
 
   pendingStrip: { maxHeight: 84, paddingVertical: spacing.sm },
   pendingWrap: { width: 64, height: 64 },
@@ -247,7 +251,7 @@ const styles = StyleSheet.create({
   },
   attachBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   input: {
-    flex: 1, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    flex: 1, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     paddingVertical: 12, paddingHorizontal: spacing.md,
     ...type.label, fontWeight: "400", color: colors.ink, maxHeight: 120,
   },

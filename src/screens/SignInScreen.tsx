@@ -5,12 +5,20 @@
 // ============================================================================
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { AuthInput } from "../components/AuthInput";
 import { AuthShell } from "./authShared";
 import { colors, radius, spacing, type } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 const SEEN_KEY = "flagrisk.onboarding.seen";
 
@@ -53,6 +61,7 @@ export function SignInScreen({ navigation }: any) {
             onPress={onLogin}
             disabled={loading}
           >
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.ctaText}>{loading ? "Signing in" : "Sign in"}</Text>
           </Pressable>
           <Text style={styles.switch}>
@@ -96,8 +105,12 @@ export function SignInScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   forgot: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "right", marginTop: 2 },
-  cta: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  cta: {
+    height: 56, borderRadius: radius.md,
+    backgroundColor: "transparent", overflow: "hidden",
+    alignItems: "center", justifyContent: "center",
+  },
+  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   switch: { ...type.caption, color: colors.textMuted, textAlign: "center" },
   switchLink: { fontWeight: "700", color: colors.ink },
   tour: { ...type.caption, fontWeight: "600", color: colors.textMuted, textAlign: "center" },

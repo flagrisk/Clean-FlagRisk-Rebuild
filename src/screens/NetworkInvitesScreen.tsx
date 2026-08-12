@@ -8,12 +8,20 @@
 // ============================================================================
 import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ArrowLeft, ShieldCheck, UserPlus } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { colors, radius, spacing, type, screenBottomPad } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 type Invite = { token: string; inviter_name: string; created_at: string; expires_at: string };
 
@@ -115,6 +123,7 @@ export function NetworkInvitesScreen() {
                   disabled={busy === item.token}
                   onPress={() => respond(item.token, true, item.inviter_name)}
                 >
+                  <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
                   <Text style={styles.acceptText}>Accept</Text>
                 </Pressable>
               </View>
@@ -133,7 +142,7 @@ const styles = StyleSheet.create({
   headTitle: { flex: 1, ...type.heading, color: colors.ink, textAlign: "center" },
   intro: { ...type.caption, color: colors.textMuted, marginHorizontal: spacing.gutter, marginTop: spacing.sm },
 
-  card: { backgroundColor: "#FAFAFA", borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  card: { backgroundColor: colors.bgElevated, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
   cardHead: { flexDirection: "row", alignItems: "center", gap: spacing.ms },
   chip: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   name: { ...type.subheading, color: colors.ink },
@@ -147,8 +156,8 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", backgroundColor: colors.bg,
   },
   ghostText: { ...type.label, fontWeight: "600", color: colors.ink },
-  acceptBtn: { flex: 1, height: 48, borderRadius: radius.sm, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  acceptText: { ...type.label, fontWeight: "600", color: colors.accent },
+  acceptBtn: { flex: 1, height: 48, borderRadius: radius.sm, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  acceptText: { ...type.label, fontWeight: "600", color: colors.accent},
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl, gap: 8 },
   emptyTitle: { ...type.subheading, color: colors.ink },

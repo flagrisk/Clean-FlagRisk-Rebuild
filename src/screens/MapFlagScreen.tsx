@@ -20,12 +20,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 import {
   TriangleAlert, Gauge, Camera, Video as VideoIcon, Layers, MapPin, MapPinOff,
-  Users, Check, X, Paperclip, ArrowLeft, Filter, Plus, MessageSquare, Siren,
+  Users, Check, X, Paperclip, ArrowLeft, LocateFixed, Plus, MessageSquare, Siren,
 } from "lucide-react-native";
 import { Image } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -51,30 +51,41 @@ const SEVERITIES: Option[] = [
   { value: "high", label: "High" }, { value: "critical", label: "Critical" },
 ];
 const SEVERITY_COLORS: Record<string, string> = {
-  low: "#5BEE6C", moderate: "#F2994A", high: "#EB5757", critical: "#C0392B",
+  low: colors.riskLow, moderate: colors.riskMedium, high: colors.riskHigh, critical: "#C0392B",
 };
 const DEFAULT = { lat: 9.0765, lng: 7.3986 };
 
 // Reporting proximity rule: you may only flag a risk you are standing near.
 const REPORT_RADIUS_M = 100;
 
+// The map shows every risk, however far. This cap applies to the Low, Mid and
+// High pills only: they surface the nearest of that level around you rather than
+// flying to one in another state.
+const NEAREST_RADIUS_KM = 10;
+
 // Silvery map: desaturated, light, low contrast so incident markers carry the
 // only strong colour on the surface.
 const SILVER_MAP_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#F2F3F5" }] },
+  // Still silvery, but legible. The ground drops to #E8EAEE so the white roads
+  // sit ten levels above it rather than three, and every stroke and label is
+  // dark enough to read at arm's length in daylight.
+  { elementType: "geometry", stylers: [{ color: "#E8EAEE" }] },
   { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8A9099" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#5F666E" }] },
   { elementType: "labels.text.stroke", stylers: [{ color: "#FFFFFF" }] },
-  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#D7DBE0" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#B4BCC5" }] },
+  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
   { featureType: "poi", stylers: [{ visibility: "simplified" }] },
   { featureType: "poi.business", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#E2ECE4" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#D5E4D8" }] },
   { featureType: "road", elementType: "geometry", stylers: [{ color: "#FFFFFF" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#E4E7EB" }] },
-  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#FDFDFD" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#F7F8FA" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#C7CDD5" }] },
+  { featureType: "road.local", elementType: "geometry", stylers: [{ color: "#FAFBFC" }] },
+  { featureType: "road.arterial", elementType: "geometry", stylers: [{ color: "#FFFFFF" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#FFFFFF" }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#AEB6C0" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#DDE6EE" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#C4D6E6" }] },
 ];
 
 const ANCHORS: { key: "low" | "moderate" | "high"; label: string }[] = [
@@ -90,7 +101,9 @@ function levelWords(level: string | null | undefined) {
 
 export function MapFlagScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const mapRef = useRef<MapView>(null);
+  const focusedOnce = useRef<string | null>(null);
   const didCenter = useRef(false);
   const insets = useSafeAreaInsets();
   const cache = useRiskCache();
@@ -114,7 +127,6 @@ export function MapFlagScreen() {
   const [stackPick, setStackPick] = useState<Incident[] | null>(null);
   const [openIncident, setOpenIncident] = useState<Incident | null>(null);
   const [incidentMedia, setIncidentMedia] = useState<string | null>(null);
-  const [filters, setFilters] = useState<string[]>([]);
   const markerTapAt = useRef(0);
 
   const loadIncidents = useCallback(async (_lat: number, _lng: number) => {
@@ -207,6 +219,21 @@ export function MapFlagScreen() {
   // Android fires the map's onPress for marker taps too, and the action field is
   // not always set, which is why tapping an incident used to open the report
   // sheet. A short guard after any marker tap settles it.
+  // Arriving from an incident: centre on it and open its sheet, once per id, so
+  // returning to the tab later does not keep re-opening the same one.
+  useEffect(() => {
+    const p = route.params || {};
+    if (p.focusLat == null || p.focusLng == null) return;
+    if (focusedOnce.current === p.focusId) return;
+    focusedOnce.current = p.focusId ?? "point";
+    mapRef.current?.animateToRegion(
+      { latitude: p.focusLat, longitude: p.focusLng, ...INITIAL_DELTA }, 600);
+    if (p.focusId) {
+      const hit = incidents.find((i) => i.id === p.focusId);
+      if (hit) setTimeout(() => openSheetFor(hit), 650);
+    }
+  }, [route.params, incidents]);
+
   function onMapPress(e: any) {
     if (e?.nativeEvent?.action === "marker-press") return;
     if (Date.now() - markerTapAt.current < 400) return;
@@ -240,6 +267,11 @@ export function MapFlagScreen() {
 
   function closeSheet() { setMode("none"); setPicked(null); setOpenIncident(null); setIncidentMedia(null); }
 
+  function prettyDistance(m: number) {
+    if (m < 950) return Math.round(m / 10) * 10 + " m away";
+    return (m / 1000).toFixed(1) + " km away";
+  }
+
   function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
     const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
     const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
@@ -248,16 +280,15 @@ export function MapFlagScreen() {
     return 2 * R * Math.asin(Math.sqrt(s));
   }
 
+  // Same source and same order as the incident screen: video first, then
+  // verified, then newest. The two surfaces cannot disagree.
   async function loadIncidentMedia(id: string) {
     setIncidentMedia(null);
     try {
-      const { data } = await supabase
-        .from("reports").select("media_url")
-        .eq("incident_id", id).not("media_url", "is", null)
-        .order("occurred_at", { ascending: false }).limit(1);
-      const path = data && data[0] ? data[0].media_url : null;
-      if (!path) return;
-      const signed = await supabase.storage.from("report-evidence").createSignedUrl(path, 3600);
+      const { data } = await supabase.rpc("incident_media", { p_incident: id });
+      const row = Array.isArray(data) && data[0] ? data[0] : null;
+      if (!row || !row.media_url) return;
+      const signed = await supabase.storage.from("report-evidence").createSignedUrl(row.media_url, 3600);
       if (signed.data) setIncidentMedia(signed.data.signedUrl);
     } catch (_e) {}
   }
@@ -280,6 +311,32 @@ export function MapFlagScreen() {
       setStackPick(cluster);
       setMode("stack");
     }
+  }
+
+  // The anchors are navigation, not decoration: each one flies to the closest
+  // incident of that level and opens it.
+  function goToNearest(level: "low" | "moderate" | "high") {
+    const pool = incidents
+      .filter((i) => {
+        const sev = i.severity === "critical" ? "high" : (i.severity ?? "low");
+        if (sev !== level || i.latitude == null || i.longitude == null) return false;
+        return metresBetween(coords.lat, coords.lng, i.latitude, i.longitude) <= NEAREST_RADIUS_KM * 1000;
+      })
+      .map((i) => ({ i, m: metresBetween(coords.lat, coords.lng, i.latitude, i.longitude) }))
+      .sort((a, b) => a.m - b.m);
+    if (pool.length === 0) {
+      showAlert({
+        title: "Nothing at that level",
+        message: "There is no " + (level === "moderate" ? "medium" : level) +
+          " risk reported within " + NEAREST_RADIUS_KM + " km of you right now.",
+      });
+      return;
+    }
+    const target = pool[0].i;
+    mapRef.current?.animateToRegion({
+      latitude: target.latitude, longitude: target.longitude, ...INITIAL_DELTA,
+    }, 600);
+    setTimeout(() => openSheetFor(target), 650);
   }
 
   function toggleMember(id: string) {
@@ -348,6 +405,8 @@ export function MapFlagScreen() {
     }
   }
 
+  const plotted = incidents.filter((i) => i.latitude != null && i.longitude != null);
+
   const selectedNames = members
     .filter((m) => selectedMembers.includes(m.member_id))
     .map((m) => m.display_name ?? "FlagRisk user");
@@ -376,11 +435,7 @@ export function MapFlagScreen() {
           mapType={mapType}
           customMapStyle={mapType === "standard" ? SILVER_MAP_STYLE : []}
         >
-          {incidents.filter((i) => {
-            if (filters.length === 0) return true;
-            const sev = i.severity === "critical" ? "high" : (i.severity ?? "low");
-            return filters.indexOf(sev) >= 0;
-          }).map((i) => {
+          {plotted.map((i) => {
             const dot = SEVERITY_COLORS[i.severity ?? ""] ?? colors.riskHigh;
             const confirmed = i.display_state === "confirmed";
             return (
@@ -414,24 +469,19 @@ export function MapFlagScreen() {
           </Pressable>
           <Text style={styles.headTitle}>LiveMap</Text>
           <Pressable
-            onPress={() => setFilters([])}
+            onPress={() => mapRef.current?.animateToRegion(
+              { latitude: coords.lat, longitude: coords.lng, ...INITIAL_DELTA }, 500)}
             style={styles.headBtnFilled}
             hitSlop={8}
           >
-            <Filter size={17} color={filters.length ? colors.ink : colors.textMuted} strokeWidth={2} />
+            <LocateFixed size={18} color={colors.ink} strokeWidth={2} />
           </Pressable>
         </View>
 
         <View style={styles.anchorRow}>
           {ANCHORS.map((a) => {
-            const on = filters.indexOf(a.key) >= 0;
             return (
-              <Pressable
-                key={a.key}
-                onPress={() => setFilters((cur) =>
-                  cur.indexOf(a.key) >= 0 ? cur.filter((k) => k !== a.key) : cur.concat([a.key]))}
-                style={[styles.anchor, on && styles.anchorOn]}
-              >
+              <Pressable key={a.key} onPress={() => goToNearest(a.key)} style={styles.anchor}>
                 <View style={[styles.anchorRing, { borderColor: SEVERITY_COLORS[a.key] }]}>
                   <View style={[styles.anchorDot, { backgroundColor: SEVERITY_COLORS[a.key] }]} />
                 </View>
@@ -464,12 +514,11 @@ export function MapFlagScreen() {
         <Plus size={26} color={colors.accent} strokeWidth={2.6} />
       </Pressable>
 
-      <View style={[styles.hint, { paddingBottom: insets.bottom + 96 }]} pointerEvents="none">
+      <View style={[styles.hint, { bottom: insets.bottom + 112 }]} pointerEvents="none">
         <Text style={styles.hintText}>
-          {incidents.length === 0
-            ? "No risks flagged nearby."
-            : incidents.length + (incidents.length > 1 ? " risks nearby." : " risk nearby.")}
-          {"  "}Tap a marker to open it. Use the plus to flag where you are.
+          {plotted.length} risk{plotted.length === 1 ? "" : "s"} nearby this current location.
+          Tap a coloured marker to open a risk report. Clicking the + button initiates a report
+          where you are. You must be within {REPORT_RADIUS_M} metres of a place to report a risk there.
         </Text>
       </View>
 
@@ -545,7 +594,7 @@ export function MapFlagScreen() {
 
                   <Label Icon={Users} hint="optional">Alert your network</Label>
                   <Pressable style={styles.pickerRow} onPress={openMemberPicker}>
-                    <Text style={[styles.pickerText, selectedMembers.length === 0 && { color: "#9F9F9F" }]} numberOfLines={1}>
+                    <Text style={[styles.pickerText, selectedMembers.length === 0 && { color: "#8B8F96" }]} numberOfLines={1}>
                       {selectedMembers.length === 0 ? "No one selected" : selectedNames.join(", ")}
                     </Text>
                   </Pressable>
@@ -556,7 +605,7 @@ export function MapFlagScreen() {
                     <Text style={styles.ghostText}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.sendBtn, sending && { opacity: 0.7 }]}
+                    style={[styles.sendBtn, { flex: 1, marginTop: 0 }, sending && { opacity: 0.7 }]}
                     onPress={sendAlert}
                     disabled={sending}
                   >
@@ -588,7 +637,7 @@ export function MapFlagScreen() {
                   })}
                 </ScrollView>
                 <Pressable
-                  style={styles.sendBtn}
+                  style={[styles.confirmPick, { marginTop: spacing.md }]}
                   onPress={() => {
                     const blocked = members.filter((m) => selectedMembers.includes(m.member_id) && m.within_reach === false);
                     if (blocked.length > 0) {
@@ -607,7 +656,7 @@ export function MapFlagScreen() {
                     setMode("profile");
                   }}
                 >
-                  <Text style={styles.sendText}>
+                  <Text style={styles.confirmPickText}>
                     {selectedMembers.length === 0 ? "Done" : "Alert " + selectedMembers.length + " selected"}
                   </Text>
                 </Pressable>
@@ -619,6 +668,7 @@ export function MapFlagScreen() {
                 ) : (
                   <View style={[styles.incMedia, styles.incMediaEmpty]}>
                     <TriangleAlert size={26} color={colors.textFaint} strokeWidth={1.8} />
+                    <Text style={styles.incNoMedia}>No media was supplied</Text>
                   </View>
                 )}
 
@@ -632,7 +682,7 @@ export function MapFlagScreen() {
                 </View>
                 <Text style={styles.incMeta}>
                   {openIncident
-                    ? Math.round(metresBetween(coords.lat, coords.lng, openIncident.latitude, openIncident.longitude)) + " meters away"
+                    ? prettyDistance(metresBetween(coords.lat, coords.lng, openIncident.latitude, openIncident.longitude))
                     : ""}
                 </Text>
 
@@ -708,10 +758,9 @@ const styles = StyleSheet.create({
   anchorRow: { flexDirection: "row", justifyContent: "center", gap: spacing.sm, marginTop: spacing.md },
   anchor: {
     flexDirection: "row", alignItems: "center", gap: 7,
-    backgroundColor: colors.bg, borderRadius: radius.pill,
+    backgroundColor: colors.bg, borderRadius: 5,
     paddingLeft: 10, paddingRight: 14, paddingVertical: 8, ...elevation.card,
   },
-  anchorOn: { borderWidth: 1.5, borderColor: colors.ink },
   anchorRing: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   anchorDot: { width: 7, height: 7, borderRadius: 4 },
   anchorText: { ...type.label, fontWeight: "600", color: colors.ink },
@@ -723,7 +772,8 @@ const styles = StyleSheet.create({
   },
 
   incMedia: { width: "100%", height: 190, borderRadius: radius.md, backgroundColor: "#F0F0F0" },
-  incMediaEmpty: { alignItems: "center", justifyContent: "center" },
+  incMediaEmpty: { alignItems: "center", justifyContent: "center", gap: 8 },
+  incNoMedia: { ...type.caption, color: colors.textMuted },
   incHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.md },
   incTitle: { ...type.heading, color: colors.ink, textTransform: "capitalize", flex: 1 },
   incPct: { ...type.label, fontWeight: "600", color: colors.textMuted },
@@ -736,9 +786,9 @@ const styles = StyleSheet.create({
   incGhostText: { ...type.label, fontWeight: "600" },
   incSolid: {
     flex: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    height: 52, borderRadius: radius.md, backgroundColor: colors.ink,
+    height: 52, borderRadius: radius.md, backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
   },
-  incSolidText: { ...type.label, fontWeight: "600", color: colors.accent },
+  incSolidText: { ...type.label, fontWeight: "600", color: colors.ink },
 
   locBanner: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
@@ -753,10 +803,11 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", ...elevation.card,
   },
 
-  hint: { position: "absolute", left: 0, right: 0, bottom: 0, alignItems: "center" },
+  hint: { position: "absolute", left: spacing.gutter, right: 100 },
   hintText: {
-    ...type.caption, color: colors.ink, backgroundColor: colors.bg,
-    borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 8, overflow: "hidden",
+    fontSize: 10, lineHeight: 13.5, color: colors.ink,
+    backgroundColor: "rgba(255,255,255,0.94)",
+    borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 7, overflow: "hidden",
   },
 
   incidentHit: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
@@ -764,11 +815,11 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    maxHeight: "86%", backgroundColor: colors.bg,
+    maxHeight: "86%", backgroundColor: "#F6F6F8",
     borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
-  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   sheetTitle: { ...type.heading, color: colors.ink },
   sheetSub: { ...type.caption, color: colors.textMuted, marginTop: 4, marginBottom: spacing.md },
 
@@ -780,7 +831,7 @@ const styles = StyleSheet.create({
   captureRow: { flexDirection: "row", gap: spacing.md },
   captureBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    height: 52, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FAFAFA",
+    height: 52, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgElevated,
   },
   captureText: { ...type.label, fontWeight: "500", color: colors.ink },
   attached: {
@@ -791,19 +842,38 @@ const styles = StyleSheet.create({
   attachedText: { flex: 1, ...type.label, fontWeight: "600", color: colors.ink },
 
   pickerRow: {
-    height: 52, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
+    height: 52, borderRadius: radius.sm, backgroundColor: colors.bgElevated,
     justifyContent: "center", paddingHorizontal: spacing.md,
   },
   pickerText: { ...type.label, fontWeight: "500", color: colors.ink },
 
   actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
+  // Cancel retreats, so it takes the muted outline. Send flag raises a warning
+  // about a real place, so it takes amber, which is the attention colour in this
+  // system. Neither is filled.
+  // An exit is silver, like every other exit. Outline colour is reserved for
+  // meaning: red for danger, amber for raising a flag, green for confirming safety.
   ghostBtn: {
-    flex: 1, height: 52, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+    flex: 1, height: 52, borderRadius: radius.md,
+    backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
     alignItems: "center", justifyContent: "center",
   },
   ghostText: { ...type.label, fontWeight: "600", color: colors.ink },
-  sendBtn: { flex: 1, height: 52, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center", marginTop: spacing.md },
-  sendText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  // No flex here. This button is used both inside a row and alone in a column,
+  // and flex: 1 in a column makes it fight the scrolling list and collapse.
+  // The row usage adds flex explicitly.
+  sendBtn: {
+    alignSelf: "stretch", height: 52, borderRadius: radius.md,
+    backgroundColor: "transparent", borderWidth: 1, borderColor: colors.riskMedium,
+    alignItems: "center", justifyContent: "center",
+  },
+  sendText: { ...type.bodyStrong, fontWeight: "600", color: "#B26A12" },
+  confirmPickText: { ...type.bodyStrong, fontWeight: "600", color: colors.ink },
+  confirmPick: {
+    alignSelf: "stretch", height: 52, borderRadius: radius.md,
+    backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
+    alignItems: "center", justifyContent: "center",
+  },
 
   memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border },
   mName: { ...type.label, color: colors.ink },

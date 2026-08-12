@@ -12,12 +12,20 @@
 // ============================================================================
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Check } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { AuthInput } from "../components/AuthInput";
 import { AuthShell } from "./authShared";
 import { colors, radius, spacing, type } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 function strengthOf(pw: string) {
   if (!pw) return { score: 0, label: "", tone: colors.border };
@@ -95,6 +103,7 @@ export function CreateAccountScreen({ navigation }: any) {
       footer={
         <>
           <Pressable style={[styles.cta, loading && { opacity: 0.7 }]} onPress={onCreate} disabled={loading}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.ctaText}>{loading ? "Creating account" : "Create account"}</Text>
           </Pressable>
           <Text style={styles.switch}>
@@ -154,8 +163,12 @@ const styles = StyleSheet.create({
   termsText: { flex: 1, ...type.caption, color: colors.textMuted, lineHeight: 18 },
   termsLink: { color: colors.ink, fontWeight: "600" },
 
-  cta: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  cta: {
+    height: 56, borderRadius: radius.md,
+    backgroundColor: "transparent", overflow: "hidden",
+    alignItems: "center", justifyContent: "center",
+  },
+  ctaText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   switch: { ...type.caption, color: colors.textMuted, textAlign: "center" },
   switchLink: { fontWeight: "700", color: colors.ink },
 });

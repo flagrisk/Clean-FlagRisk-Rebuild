@@ -37,7 +37,7 @@ export function AuthInput({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={placeholder}
-          placeholderTextColor="#9F9F9F"
+          placeholderTextColor="#8B8F96"
           secureTextEntry={hidden}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
@@ -57,10 +57,12 @@ export function AuthInput({
 
 const styles = StyleSheet.create({
   label: { ...type.label, fontWeight: "500", color: colors.ink, marginBottom: spacing.sm },
+  // The field must announce itself on a white page. #FAFAFA with no edge was
+  // two levels from the ground and read as nothing at all.
   wrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 56, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
-    borderWidth: 1, borderColor: "#FAFAFA", paddingHorizontal: spacing.md,
+    height: 56, borderRadius: radius.sm, backgroundColor: "#F1F2F5",
+    borderWidth: 1, borderColor: "rgba(20,21,42,0.14)", paddingHorizontal: spacing.md,
   },
   wrapFocused: { borderColor: colors.ink, backgroundColor: colors.bg },
   input: { flex: 1, ...type.body, color: colors.ink, padding: 0 },

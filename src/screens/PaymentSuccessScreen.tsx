@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
   receiptText: { ...type.caption, fontWeight: "600", color: colors.ink },
 
   footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md, gap: spacing.md },
-  primaryBtn: { height: 56, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  primaryBtn: { height: 56, borderRadius: radius.md, backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)", alignItems: "center", justifyContent: "center" },
+  primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.ink },
   link: { ...type.caption, fontWeight: "600", color: colors.ink, textAlign: "center" },
 });

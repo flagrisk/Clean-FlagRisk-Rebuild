@@ -10,7 +10,7 @@
 // ============================================================================
 import { ReactNode } from "react";
 import {
-  KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View,
+  Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, spacing, type } from "../theme";
@@ -18,7 +18,7 @@ import { colors, spacing, type } from "../theme";
 export function useAuthColors() {
   return {
     bg: colors.bg,
-    card: "#FAFAFA",
+    card: colors.bgElevated,
     text: colors.ink,
     muted: colors.textMuted,
     accent: colors.accent,
@@ -49,7 +49,11 @@ export function AuthShell({
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.mark}>
-            <View style={styles.markDisc} />
+            <Image
+              source={require("../../assets/mark-tile.png")}
+              style={styles.markImage}
+              resizeMode="contain"
+            />
           </View>
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -65,7 +69,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: spacing.gutter, paddingTop: spacing.xl, paddingBottom: spacing.xl },
   mark: { marginBottom: spacing.xl },
-  markDisc: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.ink },
+  // The logo tile, lime on Night Indigo. Square, 22 percent radius baked into
+  // the asset, so it matches the app icon exactly.
+  markImage: { width: 52, height: 52 },
   title: { ...type.display, color: colors.ink },
   subtitle: { ...type.label, fontWeight: "400", color: colors.textMuted, marginTop: 6 },
   fields: { marginTop: spacing.xl, gap: spacing.md },

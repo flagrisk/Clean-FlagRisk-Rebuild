@@ -1,9 +1,17 @@
-﻿// BottomSheet (theme-aware). Tap dark area to dismiss. Bottom padding = real
-// safe-area inset passed from the screen + base margin.
+// ============================================================================
+// Bottom sheet - FlagRisk v2.1
+// Tap the dimmed area to dismiss. Bottom padding is the real safe-area inset
+// passed from the screen plus a base margin.
+//
+// Brought onto the 2.1 system: a measure of silver rather than pure white, the
+// same 30 percent scrim as every other modal, a hairline top edge, and static
+// tokens instead of useTheme, since there is one mode now.
+// ============================================================================
 import { ReactNode } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useTheme } from "../theme/ThemeProvider";
-import { radius, spacing } from "../theme";
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { colors, radius, spacing, type, elevation } from "../theme";
+
+const SHEET_BG = "#F6F6F8";
 
 export function DraggableSheet({
   visible, onDismiss, title, subtitle, insetBottom = 0, children,
@@ -11,32 +19,37 @@ export function DraggableSheet({
   visible: boolean; onDismiss: () => void;
   title?: string; subtitle?: string; insetBottom?: number; children: ReactNode;
 }) {
-  const { colors, glass, mode } = useTheme();
   const pad = insetBottom + spacing.lg;
-  const sheetBg = mode === "light" ? "#ffffff" : "#121419";
   return (
     <Pressable style={styles.backdrop} onPress={onDismiss}>
       <KeyboardAvoidingView behavior="padding" style={styles.kav} pointerEvents="box-none">
-      <Pressable style={[styles.sheet, { backgroundColor: sheetBg, borderColor: glass.stroke, paddingBottom: pad }]} onPress={() => {}}>
-        <View style={[styles.grabber, { backgroundColor: mode === "light" ? "rgba(0,0,0,0.20)" : "rgba(255,255,255,0.25)" }]} />
-        {title ? <Text style={[styles.title, { color: colors.text }]}>{title}</Text> : null}
-        {subtitle ? <Text style={[styles.subtitle, { color: colors.textMuted }]}>{subtitle}</Text> : null}
-        <ScrollView contentContainerStyle={{ paddingTop: spacing.md }} keyboardShouldPersistTaps="handled">
-          {children}
-        </ScrollView>
-        <Text style={[styles.dismissHint, { color: colors.textFaint }]}>Tap outside to close</Text>
-      </Pressable>
+        <Pressable style={[styles.sheet, { paddingBottom: pad }]} onPress={() => {}}>
+          <View style={styles.grabber} />
+          {title ? <Text style={styles.title}>{title}</Text> : null}
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {children}
+          </ScrollView>
+        </Pressable>
       </KeyboardAvoidingView>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   kav: { flex: 1, width: "100%", justifyContent: "flex-end" },
-  sheet: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, borderTopWidth: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md, maxHeight: "85%" },
-  grabber: { width: 44, height: 5, borderRadius: 3, alignSelf: "center", marginBottom: spacing.md },
-  title: { fontSize: 20, fontWeight: "800", textAlign: "center" },
-  subtitle: { fontSize: 13, textAlign: "center", marginTop: 4 },
-  dismissHint: { fontSize: 12, textAlign: "center", marginTop: spacing.md },
+  sheet: {
+    backgroundColor: SHEET_BG,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    borderTopWidth: 1, borderColor: "rgba(20,21,42,0.10)",
+    paddingHorizontal: spacing.gutter, paddingTop: spacing.sm, maxHeight: "85%",
+    ...elevation.sheet,
+  },
+  grabber: {
+    width: 44, height: 4, borderRadius: 2, alignSelf: "center",
+    backgroundColor: colors.borderStrong, marginBottom: spacing.md,
+  },
+  title: { ...type.heading, color: colors.ink, textAlign: "center" },
+  subtitle: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: 4, lineHeight: 18 },
 });

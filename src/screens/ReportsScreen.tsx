@@ -13,8 +13,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
   ArrowLeft, EllipsisVertical, Search, Paperclip, X, TriangleAlert,
-  Flame, Waves, Zap, Users, Car, ShieldAlert, ArrowDownUp, Check, Image as ImageIcon,
+  ArrowDownUp, Check, Image as ImageIcon,
 } from "lucide-react-native";
+import { riskIcon } from "../riskIcons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { supabase } from "../../lib/supabase";
@@ -26,13 +27,6 @@ type Report = {
   id: string; category_id: string; occurred_at: string;
   weighted_score: number | null; decision: string | null;
   alert_level: string | null; status: string; media_url: string | null;
-};
-
-const CAT_ICON: Record<string, any> = {
-  fire_outbreak: Flame, flood: Waves, storm: Waves, electric_hazard: Zap,
-  protest: Users, traffic_jam: Car, robbery: ShieldAlert, kidnapping: ShieldAlert,
-  terrorism: ShieldAlert, vandalism: ShieldAlert, animal_threat: TriangleAlert,
-  earthquake: TriangleAlert,
 };
 
 function isVideo(url: string) {
@@ -58,9 +52,15 @@ function timeAgo(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
+// The player is split out so it is only created with a real video source.
+// useVideoPlayer("") throws, and a photograph opened here would have hit it.
+function VideoPane({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (p) => { p.loop = false; p.play(); });
+  return <VideoView style={styles.viewerMedia} player={player} contentFit="contain" allowsFullscreen nativeControls />;
+}
+
 function EvidenceViewer({ url, onClose }: { url: string; onClose: () => void }) {
   const video = isVideo(url);
-  const player = useVideoPlayer(video ? url : "", (p) => { if (video) { p.loop = false; p.play(); } });
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.viewerWrap}>
@@ -68,7 +68,7 @@ function EvidenceViewer({ url, onClose }: { url: string; onClose: () => void }) 
           <X size={28} color="#FFFFFF" strokeWidth={2.5} />
         </Pressable>
         {video ? (
-          <VideoView style={styles.viewerMedia} player={player} contentFit="contain" allowsFullscreen nativeControls />
+          <VideoPane url={url} />
         ) : (
           <Image source={{ uri: url }} style={styles.viewerMedia} resizeMode="contain" />
         )}
@@ -162,12 +162,12 @@ export function ReportsScreen() {
       </View>
 
       <View style={styles.searchWrap}>
-        <Search size={16} color="#9F9F9F" strokeWidth={2} />
+        <Search size={16} color="#8B8F96" strokeWidth={2} />
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search"
-          placeholderTextColor="#9F9F9F"
+          placeholderTextColor="#8B8F96"
           style={styles.searchInput}
         />
       </View>
@@ -196,7 +196,7 @@ export function ReportsScreen() {
           renderItem={({ item }) => {
             const band = scoreBand(item.weighted_score);
             const chip = chipFor(band.tone);
-            const Icon = CAT_ICON[item.category_id] ?? TriangleAlert;
+            const Icon = riskIcon(item.category_id);
             return (
               <Pressable style={styles.row} onPress={() => openDetail(item)}>
                 <View style={styles.thumb}>
@@ -234,7 +234,7 @@ export function ReportsScreen() {
               const band = scoreBand(detail.weighted_score);
               const chip = chipFor(band.tone);
               const pct = Math.round(Math.max(0, Math.min(1, Number(detail.weighted_score ?? 0))) * 100);
-              const Icon = CAT_ICON[detail.category_id] ?? TriangleAlert;
+              const Icon = riskIcon(detail.category_id);
               return (
                 <>
                   {detailMedia ? (
@@ -315,13 +315,13 @@ const styles = StyleSheet.create({
 
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    height: 42, borderRadius: radius.md, backgroundColor: "#FAFAFA",
+    height: 42, borderRadius: radius.md, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
     marginHorizontal: spacing.gutter, marginTop: spacing.lg, paddingHorizontal: spacing.md,
   },
   searchInput: { flex: 1, ...type.label, fontWeight: "400", color: colors.ink, padding: 0 },
 
   list: { paddingHorizontal: spacing.gutter, paddingTop: spacing.lg, paddingBottom: screenBottomPad },
-  dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: "#333333", marginBottom: spacing.xs },
+  dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginBottom: spacing.xs },
 
   row: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
@@ -346,10 +346,10 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
-  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.md },
+  grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
   detMedia: { width: "100%", height: 200, borderRadius: radius.md, backgroundColor: "#F0F0F0" },
   detMediaEmpty: { alignItems: "center", justifyContent: "center", gap: 8 },
   detNoMedia: { ...type.caption, color: colors.textMuted },

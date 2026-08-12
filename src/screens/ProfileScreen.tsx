@@ -26,6 +26,7 @@ import {
 import { supabase } from "../../lib/supabase";
 import { showAlert } from "../components/Feedback";
 import { useRiskCache } from "../theme/RiskCache";
+import { SlideAction } from "../components/SlideAction";
 import { humanize } from "../format";
 import { colors, radius, spacing, type, screenBottomPad } from "../theme";
 
@@ -263,10 +264,14 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        <Pressable style={styles.primaryBtn} onPress={() => { setCheckInDone(false); setCheckInOpen(true); }}>
-          <Send size={18} color={colors.accent} strokeWidth={2.2} />
-          <Text style={styles.primaryBtnText}>Send a check-in</Text>
-        </Pressable>
+        <View style={styles.slideWrap}>
+          <SlideAction
+            label="Slide to send a check-in"
+            committedLabel="Sent"
+            onCommit={() => { setCheckInDone(false); setCheckInOpen(true); doCheckIn(); }}
+            disabled={checkingIn}
+          />
+        </View>
         <Text style={styles.hint}>Quietly share where you are with your panic circle.</Text>
 
         <Pressable style={styles.linkRow} onPress={() => navigation.navigate("CheckInInbox")}>
@@ -307,19 +312,9 @@ export function ProfileScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.sheetTitle}>Check-in</Text>
-                <Text style={styles.sheetBody}>
-                  You are about to send a check-in to notify your network of your location.
-                </Text>
-                <Pressable
-                  style={[styles.sheetBtn, checkingIn && { opacity: 0.7 }]}
-                  onPress={doCheckIn}
-                  disabled={checkingIn}
-                >
-                  <Text style={styles.sheetBtnText}>
-                    {checkingIn ? "Sending" : "Send check-in"}
-                  </Text>
-                </Pressable>
+                <ActivityIndicator color={colors.ink} style={{ marginVertical: spacing.xl }} />
+                <Text style={styles.sheetTitle}>Sending your check-in</Text>
+                <Text style={styles.sheetBody}>Reading your location.</Text>
               </>
             )}
           </Pressable>
@@ -364,7 +359,7 @@ const styles = StyleSheet.create({
   planChipText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
 
   infoCard: {
-    width: "100%", backgroundColor: "#FAFAFA", borderRadius: radius.md,
+    width: "100%", backgroundColor: colors.bgElevated, borderRadius: radius.md,
     paddingHorizontal: spacing.md, marginTop: spacing.lg,
   },
   infoRow: {
@@ -374,14 +369,15 @@ const styles = StyleSheet.create({
   infoIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   infoLabel: { ...type.caption, color: colors.textMuted },
   infoValue: { ...type.label, color: colors.ink, marginTop: 2 },
-  upgradeBtn: { backgroundColor: colors.ink, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 8 },
-  upgradeText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.accent },
-
-  primaryBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm,
-    width: "100%", height: 52, borderRadius: radius.md, backgroundColor: colors.ink, marginTop: spacing.xl,
+  // White on the #FAFAFA card, with a border strong enough to read as a control.
+  // The previous #F7F7F7 sat five levels from its own card and looked disabled.
+  upgradeBtn: {
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: "rgba(20,21,42,0.28)",
+    borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 9,
   },
-  primaryBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  upgradeText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
+
+  slideWrap: { width: "100%", marginTop: spacing.xl },
   hint: { ...type.caption, color: colors.textMuted, marginTop: 8, textAlign: "center" },
 
   linkRow: {
@@ -393,10 +389,10 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: colors.bg, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm, alignItems: "center",
   },
-  grabber: { width: 44, height: 4, borderRadius: 2, backgroundColor: "#CDCDCD", marginBottom: spacing.xl },
+  grabber: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.xl },
   doneDisc: {
     width: 72, height: 72, borderRadius: 36, backgroundColor: colors.ink,
     alignItems: "center", justifyContent: "center", marginBottom: spacing.md,
@@ -407,8 +403,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm, lineHeight: 23, maxWidth: 300,
   },
   sheetBtn: {
-    width: "100%", height: 56, borderRadius: radius.pill, backgroundColor: "#333333",
+    width: "100%", height: 56, borderRadius: radius.md,
+    backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)",
     alignItems: "center", justifyContent: "center", marginTop: spacing.xl,
   },
-  sheetBtnText: { ...type.bodyStrong, fontWeight: "700", color: colors.accent },
+  sheetBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.ink },
 });

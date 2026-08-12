@@ -12,6 +12,7 @@ import {
   Image, KeyboardAvoidingView, Platform, Pressable, ScrollView,
   StyleSheet, Text, TextInput, View,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { ArrowLeft, X, Check } from "lucide-react-native";
@@ -21,6 +22,13 @@ import { useRiskCache } from "../theme/RiskCache";
 import { PhoneInput } from "../components/PhoneInput";
 import { COUNTRIES, DEFAULT_COUNTRY } from "../data/countries";
 import { colors, radius, spacing, type } from "../theme";
+
+// The primary fill. Ink through graphite on the same 135 degree axis as the
+// Dashboard tiles. A stylesheet cannot hold a gradient, so it is laid behind
+// the button content instead.
+const PRIMARY_GRAD = ["#101216", "#1B1E24", "#33373F"] as const;
+const PRIMARY_STOPS = [0, 0.45, 1] as const;
+
 
 function splitPhone(full: string): { dial: string; number: string } {
   const v = (full || "").trim();
@@ -119,7 +127,7 @@ export function EditProfileScreen() {
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
               placeholder="Enter display name"
-              placeholderTextColor="#9F9F9F"
+              placeholderTextColor="#8B8F96"
             />
           </View>
 
@@ -138,6 +146,7 @@ export function EditProfileScreen() {
 
         <View style={styles.footer}>
           <Pressable style={[styles.saveBtn, busy && { opacity: 0.7 }]} onPress={save} disabled={busy}>
+            <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
             <Text style={styles.saveText}>{busy ? "Saving" : "Save changes"}</Text>
           </Pressable>
         </View>
@@ -175,14 +184,14 @@ const styles = StyleSheet.create({
   field: { width: "100%", marginTop: spacing.xl },
   label: { ...type.label, fontWeight: "500", color: colors.ink, marginBottom: spacing.sm },
   input: {
-    height: 48, borderRadius: radius.sm, backgroundColor: "#FAFAFA",
-    borderWidth: 1, borderColor: "#FAFAFA",
+    height: 48, borderRadius: radius.sm, backgroundColor: "#F1F2F5", borderWidth: 1, borderColor: "rgba(20,21,42,0.14)",
+    borderWidth: 1, borderColor: colors.bgElevated,
     paddingHorizontal: spacing.md, ...type.body, color: colors.ink,
   },
   inputFocused: { borderColor: colors.ink, backgroundColor: colors.bg },
   hint: { ...type.caption, color: colors.textMuted, marginTop: 8 },
 
   footer: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.md },
-  saveBtn: { height: 52, borderRadius: radius.md, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" },
-  saveText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent },
+  saveBtn: { height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  saveText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 });

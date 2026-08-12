@@ -10,6 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as FileSystem from "expo-file-system/legacy";
+import * as ImageManipulator from "expo-image-manipulator";
 import { decode as decodeBase64 } from "base64-arraybuffer";
 import { supabase } from "../../lib/supabase";
 import { colors, radius, spacing, type } from "../theme";
@@ -55,7 +56,8 @@ export function PhotoCaptureScreen() {
     }
   }
 
-  async function upload(uri) {
+  async function upload(uriIn) {
+    let uri = uriIn;
     setUploading(true);
     setProgress(0);
     try {
@@ -63,6 +65,16 @@ export function PhotoCaptureScreen() {
       const { data: u } = await supabase.auth.getUser();
       const token = sess.session ? sess.session.access_token : null;
       const path = (u.user ? u.user.id : "anon") + "/" + Date.now() + ".jpg";
+      // Downscale first. A modern phone writes a 3 to 6 MB frame at quality 0.7,
+      // which is what made evidence crawl on mobile data. 1600px on the long
+      // edge is more than enough to read a street sign and lands near 250 KB.
+      const shrunk = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      uri = shrunk.uri;
+
       // Read the local file into real bytes. fetch(uri).blob() does NOT work on
       // React Native for file:// URIs - it yields a registry-backed Blob that
       // XHR sends as an empty body, so the object lands in Storage at 0 bytes

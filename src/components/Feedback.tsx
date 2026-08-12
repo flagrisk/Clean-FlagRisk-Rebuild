@@ -12,6 +12,7 @@
 // ============================================================================
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import {
   Check, TriangleAlert, Info, Siren, CircleAlert,
 } from "lucide-react-native";
@@ -31,16 +32,15 @@ export function showToast(message: string, opts?: { tone?: Cfg["tone"] }) {
 }
 export function showModal(cfg?: Cfg) { showAlert(cfg || {}); }
 
+// The icon carries the state on its own. Nothing else in the card is tinted.
 function look(c: Cfg | null) {
-  if (!c) return { fg: colors.ink, bg: "#F0F0F0", Icon: Info };
-  if (c.severity === "critical" || c.severity === "high") {
-    return { fg: colors.riskHigh, bg: "#FBD1CF", Icon: Siren };
-  }
-  if (c.severity === "moderate") return { fg: "#B26A12", bg: "#FDE7CF", Icon: TriangleAlert };
-  if (c.severity === "low") return { fg: "#1C9D6B", bg: "#D2F0E3", Icon: Check };
-  if (c.tone === "error") return { fg: colors.riskHigh, bg: "#FBD1CF", Icon: CircleAlert };
-  if (c.tone === "success") return { fg: "#1C9D6B", bg: "#D2F0E3", Icon: Check };
-  return { fg: colors.ink, bg: "#F0F0F0", Icon: Info };
+  if (!c) return { fg: colors.ink, Icon: Info };
+  if (c.severity === "critical" || c.severity === "high") return { fg: colors.riskHigh, Icon: Siren };
+  if (c.severity === "moderate") return { fg: "#B26A12", Icon: TriangleAlert };
+  if (c.severity === "low") return { fg: colors.safe, Icon: Check };
+  if (c.tone === "error") return { fg: colors.riskHigh, Icon: CircleAlert };
+  if (c.tone === "success") return { fg: colors.safe, Icon: Check };
+  return { fg: colors.ink, Icon: Info };
 }
 
 export function FeedbackProvider({ children }: { children: React.ReactNode }) {
@@ -75,8 +75,12 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { _alert = open; return () => { _alert = null; }; }, [open]);
 
-  const buttons: Btn[] = cfg && cfg.buttons ? cfg.buttons : [];
-  const hasButtons = buttons.length > 0;
+  // A sheet this size should never appear without a way out. When a caller
+  // passes no buttons the notice still self dismisses on a read-length timer,
+  // but it also carries one so the modal is never a dead end.
+  const given: Btn[] = cfg && cfg.buttons ? cfg.buttons : [];
+  const buttons: Btn[] = given.length > 0 ? given : [{ text: "Close" }];
+  const hasButtons = true;
   const l = look(cfg);
   const Icon = l.Icon;
 
@@ -91,10 +95,15 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
           <Animated.View
             style={[styles.cardWrap, { opacity, transform: [{ translateY: translate }] }]}
           >
-            <Pressable style={styles.card} onPress={() => {}}>
-              <View style={[styles.disc, { backgroundColor: l.bg }]}>
-                <Icon size={20} color={l.fg} strokeWidth={2.2} />
-              </View>
+            <Pressable onPress={() => {}}>
+              <LinearGradient
+                colors={["#F9F9FB", "#F6F6F8", "#F0F0F2", "#E6E6EA"]}
+                locations={[0, 0.38, 0.72, 1]}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.card}
+              >
+              <View style={styles.grabber} />
+              <Icon size={40} color={l.fg} strokeWidth={2.2} />
 
               {cfg && cfg.title ? <Text style={styles.title}>{cfg.title}</Text> : null}
               {cfg && cfg.message ? <Text style={styles.msg}>{cfg.message}</Text> : null}
@@ -102,7 +111,6 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
               {hasButtons ? (
                 <View style={styles.btnRow}>
                   {buttons.map((b, i) => {
-                    const cancel = b.style === "cancel";
                     const destructive = b.style === "destructive";
                     return (
                       <Pressable
@@ -110,13 +118,13 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                         onPress={() => { close(); if (b.onPress) b.onPress(); }}
                         style={[
                           styles.btn,
-                          cancel ? styles.btnGhost : destructive ? styles.btnDestructive : styles.btnSolid,
+                          destructive ? styles.btnDestructive : styles.btnSilver,
                         ]}
                       >
                         <Text
                           style={[
                             styles.btnText,
-                            cancel ? styles.btnTextGhost : destructive ? styles.btnTextDestructive : styles.btnTextSolid,
+                            destructive ? styles.btnTextDestructive : styles.btnTextSilver,
                           ]}
                         >
                           {b.text || "OK"}
@@ -126,6 +134,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                   })}
                 </View>
               ) : null}
+              </LinearGradient>
             </Pressable>
           </Animated.View>
         </Pressable>
@@ -135,29 +144,30 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1, backgroundColor: "rgba(1,1,20,0.30)",
-    alignItems: "center", justifyContent: "flex-end", padding: spacing.gutter,
-  },
-  cardWrap: { width: "100%", maxWidth: 420, alignSelf: "center", marginBottom: spacing.xl },
+  backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
+  cardWrap: { width: "100%" },
   card: {
-    backgroundColor: colors.bg, borderRadius: radius.lg,
-    paddingVertical: spacing.lg, paddingHorizontal: spacing.lg, ...elevation.sheet,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    paddingTop: spacing.sm, paddingHorizontal: spacing.gutter, paddingBottom: spacing.xxl,
+    alignItems: "center",
+    borderTopWidth: 1, borderColor: "rgba(20,21,42,0.10)",
+    ...elevation.sheet,
   },
-  disc: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: "center", justifyContent: "center", marginBottom: spacing.ms,
+  grabber: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.lg },
+  title: { ...type.title, color: colors.ink, textAlign: "center", marginTop: spacing.ms },
+  msg: {
+    ...type.body, color: colors.textMuted, textAlign: "center",
+    lineHeight: 22, marginTop: spacing.sm, maxWidth: 270,
   },
-  title: { ...type.subheading, color: colors.ink },
-  msg: { ...type.label, fontWeight: "400", color: colors.textMuted, lineHeight: 20, marginTop: 6 },
 
-  btnRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
-  btn: { flex: 1, height: 48, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.md },
-  btnSolid: { backgroundColor: colors.ink },
-  btnGhost: { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
-  btnDestructive: { backgroundColor: colors.riskHigh },
-  btnText: { ...type.label, fontWeight: "600" },
-  btnTextSolid: { color: colors.accent },
-  btnTextGhost: { color: colors.ink },
-  btnTextDestructive: { color: "#FFFFFF" },
+  btnRow: { flexDirection: "row", gap: spacing.ms, marginTop: spacing.lg, width: "100%" },
+  btn: {
+    flex: 1, height: 54, borderRadius: radius.md,
+    alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.md,
+  },
+  btnSilver: { backgroundColor: "#F7F7F7", borderWidth: 1, borderColor: "rgba(20,21,42,0.10)" },
+  btnDestructive: { backgroundColor: "rgba(255,255,255,0.65)", borderWidth: 1, borderColor: colors.riskHigh },
+  btnText: { ...type.label, fontWeight: "600", fontSize: 15, lineHeight: 20 },
+  btnTextSilver: { color: colors.ink },
+  btnTextDestructive: { color: colors.riskHigh },
 });

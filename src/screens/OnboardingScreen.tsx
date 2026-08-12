@@ -56,8 +56,10 @@ export function OnboardingScreen({ navigation }: any) {
     navigation.replace(route);
   }
 
+  // Every exit from onboarding lands on Sign In. Creating an account is one tap
+  // from there, and a returning user should never be dropped on a signup form.
   const next = () => {
-    if (last) leaveTo("CreateAccount");
+    if (last) leaveTo("SignIn");
     else ref.current?.scrollToIndex({ index: index + 1 });
   };
 
@@ -103,17 +105,17 @@ export function OnboardingScreen({ navigation }: any) {
         </View>
 
         <Pressable style={styles.cta} onPress={next}>
-          <Text style={styles.ctaText}>{last ? "Create account" : "Next"}</Text>
+          <Text style={styles.ctaText}>{last ? "Get started" : "Next"}</Text>
         </Pressable>
 
         <View style={styles.linkRow}>
           {!last ? (
-            <Pressable onPress={() => leaveTo("CreateAccount")} hitSlop={8}>
+            <Pressable onPress={() => leaveTo("SignIn")} hitSlop={8}>
               <Text style={styles.link}>Skip</Text>
             </Pressable>
           ) : <View />}
-          <Pressable onPress={() => leaveTo("SignIn")} hitSlop={8}>
-            <Text style={styles.link}>I already have an account</Text>
+          <Pressable onPress={() => leaveTo("CreateAccount")} hitSlop={8}>
+            <Text style={styles.link}>Create an account</Text>
           </Pressable>
         </View>
       </SafeAreaView>

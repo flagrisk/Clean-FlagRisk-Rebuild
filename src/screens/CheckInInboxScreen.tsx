@@ -154,7 +154,7 @@ export function CheckInInboxScreen() {
           <Switch
             value={notifyPref}
             onValueChange={toggleNotify}
-            trackColor={{ false: "#CDCDCD", true: colors.ink }}
+            trackColor={{ false: colors.borderStrong, true: colors.ink }}
             thumbColor="#FFFFFF"
           />
         </View>
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
 
   notifyCard: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: "#FAFAFA", borderRadius: radius.md,
+    backgroundColor: colors.bgElevated, borderRadius: radius.md,
     marginHorizontal: spacing.gutter, marginTop: spacing.lg,
     paddingHorizontal: spacing.md, paddingVertical: spacing.ms,
   },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.gutter, marginTop: spacing.md, padding: 4, gap: 4,
   },
   segmentBtn: { flex: 1, height: 36, borderRadius: 6, alignItems: "center", justifyContent: "center" },
-  segmentBtnOn: { backgroundColor: "#333333" },
+  segmentBtnOn: { backgroundColor: colors.ink },
   segmentText: { fontSize: 13, lineHeight: 17, fontWeight: "500", color: "#91958E" },
   segmentTextOn: { color: "#FFFFFF", fontWeight: "600" },
 
