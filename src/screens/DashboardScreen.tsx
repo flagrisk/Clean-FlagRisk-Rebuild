@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Dashboard - FlagRisk v2.1
 // Rebuilt against Figma "Flagrisk v2.1" node 129:21117.
 //   canvas #F5F5FA | hero 364 tall, white -> band gradient | tiles 152 sq r16
@@ -14,10 +14,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
+import { showAlert } from "../components/Feedback";
 import { useRiskCache } from "../theme/RiskCache";
 import { RiskGauge } from "../components/RiskGauge";
 import {
-  Siren, Bell, Navigation, ArrowUpRight, ChevronRight, ArrowRight,
+  Siren, Bell, ArrowUpRight, ChevronRight, ArrowRight,
   TriangleAlert, ShieldCheck, Car, UserPlus, MapPin,
 } from "lucide-react-native";
 import { colors, radius, spacing, type, elevation, screenBottomPad } from "../theme";
@@ -147,6 +148,7 @@ export function DashboardScreen() {
   const [activePanics, setActivePanics] = useState(0);
   const [unread, setUnread] = useState(0);
   const [tier, setTier] = useState<string>(cp?.tier ?? "basic");
+  const [hasCustom, setHasCustom] = useState(false);
   const [factors, setFactors] = useState<string[]>([]);
 
   // The factors come from risk_score_explained, the same function the Risk
@@ -187,7 +189,7 @@ export function DashboardScreen() {
         .rpc("incidents_all")
         .then(({ data }) => { if (data) setNearby(data as any); });
       const { data: prof } = await supabase
-        .from("profiles").select("display_name, current_risk_score, current_risk_band, avatar_url, current_tier")
+        .from("profiles").select("display_name, current_risk_score, current_risk_band, avatar_url, current_tier, custom_radius_expires_at")
         .eq("id", uid).single();
       if (prof?.display_name) setName(prof.display_name.trim().split(/\s+/)[0]);
       if (prof?.avatar_url) setAvatarUrl(prof.avatar_url);
@@ -195,6 +197,7 @@ export function DashboardScreen() {
       if (prof?.current_risk_score != null) setScore(Number(prof.current_risk_score));
       if (prof?.current_risk_band) setBand(prof.current_risk_band);
       if (prof?.current_tier) setTier(prof.current_tier);
+      setHasCustom(!!prof?.custom_radius_expires_at && new Date(prof.custom_radius_expires_at) > new Date());
       setFetched(true);
       if (prof?.current_risk_score != null && prof?.current_risk_band)
         cache.setRisk(Number(prof.current_risk_score), prof.current_risk_band);
@@ -318,8 +321,23 @@ export function DashboardScreen() {
               <Bell size={19} color={colors.ink} strokeWidth={2} />
               {unread > 0 ? <View style={styles.headPip} /> : null}
             </Pressable>
-            <Pressable onPress={() => navigation.navigate("Map")} style={styles.headBtn} hitSlop={8}>
-              <Navigation size={18} color={colors.ink} strokeWidth={2} />
+            <Pressable
+              onPress={() => {
+                if (tier === "pro" || tier === "premium" || hasCustom) return navigation.navigate("TripWatch");
+                showAlert({
+                  title: "Not on your plan",
+                  message: "Trip Watch is only included in Pro and higher plans, or with custom coverage. It checks you in while you travel and tells the people you choose if you go quiet.",
+                  buttons: [
+                    { text: "Not now", style: "cancel" },
+                    { text: "See plans", onPress: () => navigation.navigate("PlanPricing") },
+                  ],
+                });
+              }}
+              style={styles.tripBtn}
+              hitSlop={8}
+            >
+              <Car size={17} color={colors.ink} strokeWidth={2} />
+              <Text style={styles.tripText}>Trip Watch</Text>
             </Pressable>
           </View>
 
@@ -472,6 +490,12 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", ...elevation.hairline,
   },
   headPip: { position: "absolute", top: 9, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.riskHigh },
+  tripBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    height: 40, borderRadius: 20, backgroundColor: "#FEFEFE",
+    paddingHorizontal: 14, ...elevation.hairline,
+  },
+  tripText: { fontSize: 13, lineHeight: 17, fontWeight: "600", color: colors.ink },
 
   heroWrap: { borderRadius: radius.xl, overflow: "hidden", marginBottom: spacing.md, ...elevation.card },
   hero: { paddingTop: spacing.md, paddingBottom: spacing.lg, paddingHorizontal: spacing.md },
@@ -525,3 +549,7 @@ const styles = StyleSheet.create({
   rowTitle: { ...type.label, color: colors.ink, textTransform: "capitalize" },
   rowSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
 });
+
+
+
+

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Sign In - FlagRisk v2.1
 // Designed, not rebuilt: no mockup exists for authentication.
 // Email and password via Supabase. Behaviour unchanged.
@@ -91,10 +91,7 @@ export function SignInScreen({ navigation }: any) {
         secure
       />
       <Pressable
-        onPress={() => showAlert({
-          title: "Password reset",
-          message: "Password reset is not available yet. Contact support and we will help you get back in.",
-        })}
+        onPress={() => navigation.navigate("ResetPassword", { email: email.trim() })}
         hitSlop={8}
       >
         <Text style={styles.forgot}>Forgot your password?</Text>
@@ -115,3 +112,4 @@ const styles = StyleSheet.create({
   switchLink: { fontWeight: "700", color: colors.ink },
   tour: { ...type.caption, fontWeight: "600", color: colors.textMuted, textAlign: "center" },
 });
+

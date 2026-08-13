@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Trip Watch - FlagRisk v2.1
 // Rebuilt against Figma "Trip Watch" (12.0 flow, nodes 75:2591 / 2665 / 2758 /
 // 2831 / 2932).
@@ -172,10 +172,10 @@ export function TripWatchScreen() {
       });
       setStarting(false);
       if (error) {
-        if (error.message && error.message.indexOf("Trip Watch requires Pro") >= 0) {
+        if (error.message && error.message.indexOf("trip_watch_not_included") >= 0) {
           showAlert({
-            title: "Pro feature",
-            message: "Trip Watch is available on Pro and higher. Upgrade to schedule automatic check-ins.",
+            title: "Not on your plan",
+            message: "Trip Watch is only included in Pro and higher plans, or with custom coverage. It checks you in while you travel and tells the people you choose if you go quiet.",
             buttons: [
               { text: "Not now", style: "cancel" },
               { text: "See plans", onPress: () => navigation.navigate("PlanPricing") },
@@ -655,3 +655,4 @@ const styles = StyleSheet.create({
   },
   primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 });
+
