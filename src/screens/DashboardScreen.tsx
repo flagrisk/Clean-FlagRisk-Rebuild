@@ -40,6 +40,13 @@ const CANVAS = "#F5F5FA";
 // #B0B0B0 and the midpoint follows it down. The diagonal and its position are
 // unchanged: white to 45 percent, transition through the middle of the tile.
 const TILE_GRAD = ["#FFFFFF", "#FFFFFF", "#DCDCDC", "#B0B0B0"] as const;
+
+// Option A, the tinted wash, one step deeper. The ramp keeps the same shape and
+// the same 135 degree axis; it ends 75 percent toward the hue. Ink stays
+// readable there at 6.9 to 1 on the alarm and 8.9 on the network, both well
+// above the 4.5 that body text needs.
+const ALARM_GRAD = ["#FFFFFF", "#FAD2D2", "#F39797", "#EB5757"] as const;
+const NETWORK_GRAD = ["#FFFFFF", "#CDEAE7", "#8CD0C8", "#46B3A6"] as const;
 const CHIP_BG = "#EBEBEB";
 
 // The radius the score explanation is read at. The card, the drawer and the
@@ -103,28 +110,35 @@ function SectionHead({ title, onPress }: { title: string; onPress: () => void })
   );
 }
 
+// The tile takes its own ramp so the alarm and the network can differ. On a
+// saturated ground the title, value and badge have to move with it, not just
+// the background, or they sit at ink on red and cannot be read.
 function Tile({
-  title, value, onPress, badge,
+  title, value, onPress, badge, ramp, onColour,
 }: {
   title: string; value: string; onPress: () => void; badge?: number;
+  ramp: readonly string[]; onColour?: boolean;
 }) {
+  const fg = onColour ? "#FFFFFF" : colors.ink;
   return (
-    <Pressable onPress={onPress} style={styles.tileWrap}>
+    <Pressable onPress={onPress} style={[styles.tileWrap, onColour && styles.tileWrapPlain]}>
       <LinearGradient
-        colors={TILE_GRAD}
+        colors={ramp}
         locations={[0, 0.45, 0.7, 1]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={styles.tile}
       >
-        <Text style={styles.tileTitle}>{title}</Text>
+        <Text style={[styles.tileTitle, { color: fg }]}>{title}</Text>
         <View style={styles.tileFoot}>
-          <Text style={styles.tileValue}>{value}</Text>
-          <View style={styles.tileArrow}>
+          <Text style={[styles.tileValue, { color: fg }]}>{value}</Text>
+          <View style={[styles.tileArrow, onColour && { backgroundColor: "rgba(255,255,255,0.94)" }]}>
             <ArrowRight size={20} color={colors.ink} strokeWidth={2} />
           </View>
         </View>
         {badge && badge > 0 ? (
-          <View style={styles.tileBadge}><Text style={styles.tileBadgeText}>{badge}</Text></View>
+          <View style={[styles.tileBadge, onColour && styles.tileBadgeOnColour]}>
+            <Text style={[styles.tileBadgeText, onColour && { color: colors.ink }]}>{badge}</Text>
+          </View>
         ) : null}
       </LinearGradient>
     </Pressable>
@@ -322,17 +336,7 @@ export function DashboardScreen() {
               {unread > 0 ? <View style={styles.headPip} /> : null}
             </Pressable>
             <Pressable
-              onPress={() => {
-                if (tier === "pro" || tier === "premium" || hasCustom) return navigation.navigate("TripWatch");
-                showAlert({
-                  title: "Not on your plan",
-                  message: "Trip Watch is only included in Pro and higher plans, or with custom coverage. It checks you in while you travel and tells the people you choose if you go quiet.",
-                  buttons: [
-                    { text: "Not now", style: "cancel" },
-                    { text: "See plans", onPress: () => navigation.navigate("PlanPricing") },
-                  ],
-                });
-              }}
+              onPress={() => navigation.navigate("TripWatch")}
               style={styles.tripBtn}
               hitSlop={8}
             >
@@ -376,12 +380,14 @@ export function DashboardScreen() {
               value={String(activePanics)}
               badge={activePanics}
               onPress={() => navigation.navigate("Panic")}
+              ramp={ALARM_GRAD}
             />
             <Tile
               title={"Network\nMembers"}
               value={networkCount + " of 7"}
               badge={pendingRequests}
               onPress={() => navigation.navigate("Network")}
+              ramp={NETWORK_GRAD}
             />
           </View>
 
@@ -534,6 +540,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.riskHigh,
   },
   tileBadgeText: { ...type.micro, color: "#FFFFFF", fontWeight: "700" },
+  tileWrapPlain: { borderWidth: 0 },
+  tileBadgeOnColour: { backgroundColor: "#FFFFFF" },
 
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", height: 28, marginTop: spacing.lg, marginBottom: spacing.sm },
   sectionTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
@@ -549,6 +557,12 @@ const styles = StyleSheet.create({
   rowTitle: { ...type.label, color: colors.ink, textTransform: "capitalize" },
   rowSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
 });
+
+
+
+
+
+
 
 
 

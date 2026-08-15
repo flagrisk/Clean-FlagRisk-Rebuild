@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Risk Summary - FlagRisk v2.1
 // Presented as a DRAWER over the dimmed Dashboard, which is what the mock name
 // "Risk Score Drawup" means. Registered with presentation: "transparentModal"
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   shell: { flex: 1, justifyContent: "flex-end" },
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,1,20,0.34)" },
   drawer: {
-    maxHeight: "88%", backgroundColor: "#F6F6F8",
+    maxHeight: "88%", backgroundColor: "#FFFFFF",
     borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
     paddingTop: spacing.sm, ...elevation.sheet,
   },
@@ -225,3 +225,4 @@ const styles = StyleSheet.create({
   howTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
   howText: { ...type.caption, color: colors.textMuted, lineHeight: 18 },
 });
+

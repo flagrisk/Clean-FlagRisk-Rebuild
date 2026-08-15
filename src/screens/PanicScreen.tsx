@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Alarm - FlagRisk v2.1
 // Rebuilt against Figma "Alarms" (6.0 Alarm flow, nodes 71:450 / 491 / 532 / 573).
 //   header 36pt round back | "Emergency SOS" 14/500 centred
@@ -149,7 +149,8 @@ export function PanicScreen() {
       const json = await res.json();
       setFiring(false);
       if (!res.ok || !json.ok) {
-        const msg = json.error === "panic_privilege_suspended" ? json.message
+        const msg = json.error === "phone_not_verified" ? json.message
+          : json.error === "panic_privilege_suspended" ? json.message
           : json.error === "panic_cooldown" ? json.message
           : json.error ?? "Could not activate alarm";
         return showAlert({ title: "Alarm not sent", message: msg, tone: "error" });
@@ -375,3 +376,4 @@ const styles = StyleSheet.create({
 
   trackWrap: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.lg, marginTop: spacing.lg },
 });
+

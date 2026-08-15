@@ -172,13 +172,26 @@ export function TripWatchScreen() {
       });
       setStarting(false);
       if (error) {
+        // The phone gate refuses before the tier check does, so this comes
+        // first. Without it the person sees the raw code phone_not_verified.
+        if (error.message && error.message.indexOf("phone_not_verified") >= 0) {
+          showAlert({
+            title: "Verify your number first",
+            message: "Trip Watch tells the people you choose if you go quiet, so we need to know who you are. Verify your phone number to use it.",
+            buttons: [
+              { text: "Not now", style: "cancel" },
+              { text: "Verify now", onPress: () => navigation.navigate("PhoneVerify", { mode: "attach" }) },
+            ],
+          });
+          return;
+        }
         if (error.message && error.message.indexOf("trip_watch_not_included") >= 0) {
           showAlert({
             title: "Not on your plan",
             message: "Trip Watch is only included in Pro and higher plans, or with custom coverage. It checks you in while you travel and tells the people you choose if you go quiet.",
             buttons: [
-              { text: "Not now", style: "cancel" },
-              { text: "See plans", onPress: () => navigation.navigate("PlanPricing") },
+              { text: "Free version", style: "cancel", onPress: () => navigation.navigate("Main", { screen: "Profile", params: { focus: "checkin" } }) },
+              { text: "Upgrade plan", onPress: () => navigation.navigate("PlanPricing") },
             ],
           });
           return;
@@ -583,7 +596,7 @@ const styles = StyleSheet.create({
   mapWrap: { height: 260, marginTop: spacing.md, overflow: "hidden" },
 
   sheet: {
-    flex: 1, backgroundColor: "#F6F6F8",
+    flex: 1, backgroundColor: "#FFFFFF",
     borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     marginTop: -radius.lg, paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
     ...elevation.sheet,
@@ -655,4 +668,8 @@ const styles = StyleSheet.create({
   },
   primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 });
+
+
+
+
 

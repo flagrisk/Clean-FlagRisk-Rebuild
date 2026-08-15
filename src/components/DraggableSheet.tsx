@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Bottom sheet - FlagRisk v2.1
 // Tap the dimmed area to dismiss. Bottom padding is the real safe-area inset
 // passed from the screen plus a base margin.
@@ -11,7 +11,10 @@ import { ReactNode } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { colors, radius, spacing, type, elevation } from "../theme";
 
-const SHEET_BG = "#F6F6F8";
+// White, matching every other sheet and the feedback modal. The silver was
+// doing separation work the backdrop already does: the scrim, the top hairline
+// and the shadow are what read as raised, not the fill.
+const SHEET_BG = "#FFFFFF";
 
 export function DraggableSheet({
   visible, onDismiss, title, subtitle, insetBottom = 0, children,
@@ -53,3 +56,4 @@ const styles = StyleSheet.create({
   title: { ...type.heading, color: colors.ink, textAlign: "center" },
   subtitle: { ...type.caption, color: colors.textMuted, textAlign: "center", marginTop: 4, lineHeight: 18 },
 });
+

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Map and flag - FlagRisk v2.1
 //
 // STRUCTURAL DECISIONS, each made because the obvious version failed:
@@ -205,7 +205,7 @@ export function MapFlagScreen() {
       } catch { loadIncidents(DEFAULT.lat, DEFAULT.lng); }
     })();
     supabase.from("risk_categories").select("id, display_name").eq("is_active", true)
-      .order("base_severity", { ascending: false })
+      .order("display_name", { ascending: true })
       .then(({ data }) => { if (data) setCategories(data.map((c) => ({ value: c.id, label: c.display_name }))); });
     (async () => {
       const { data: u } = await supabase.auth.getUser();
@@ -877,7 +877,7 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    maxHeight: "86%", backgroundColor: "#F6F6F8",
+    maxHeight: "86%", backgroundColor: "#FFFFFF",
     borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
@@ -953,3 +953,5 @@ const styles = StyleSheet.create({
   stackLabel: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink, textTransform: "capitalize" },
   stackState: { ...type.caption, color: colors.textMuted },
 });
+
+

@@ -109,7 +109,6 @@ import { CheckInInboxScreen } from "./src/screens/CheckInInboxScreen";
 import { NetworkInvitesScreen } from "./src/screens/NetworkInvitesScreen";
 import { ChangePasswordScreen } from "./src/screens/ChangePasswordScreen";
 import { ResetPasswordScreen } from "./src/screens/ResetPasswordScreen";
-import { PhoneVerifyScreen } from "./src/screens/PhoneVerifyScreen";
 import { PhonebookScreen } from "./src/screens/PhonebookScreen";
 import { NetworkFlagDetailScreen } from "./src/screens/NetworkFlagDetailScreen";
 import { PanicInboxScreen } from "./src/screens/PanicInboxScreen";
@@ -211,7 +210,6 @@ function Root() {
               <Stack.Screen name="CheckInInbox" component={CheckInInboxScreen} />
               <Stack.Screen name="NetworkInvites" component={NetworkInvitesScreen} />
               <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-              <Stack.Screen name="PhoneVerify" component={PhoneVerifyScreen} />
               <Stack.Screen name="Phonebook" component={PhonebookScreen} />
               <Stack.Screen name="NetworkFlagDetail" component={NetworkFlagDetailScreen} />
               <Stack.Screen name="PanicInbox" component={PanicInboxScreen} />
@@ -220,7 +218,6 @@ function Root() {
             <>
               <Stack.Screen name="SignIn" component={SignInScreen} />
               <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-              <Stack.Screen name="PhoneVerify" component={PhoneVerifyScreen} />
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
               <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
               <Stack.Screen name="Help" component={HelpScreen} />

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Account / Profile - FlagRisk v2.1
 // Rebuilt against Figma "Profile" (node 115:1942) and the 11.0 Profile flow.
 //   header 36pt round back | title 20/700 centred | 36pt #F0F0F0 edit button
@@ -10,10 +10,10 @@
 // FIX: the avatar upload used fetch(uri).blob(), which yields an empty body on
 // React Native and wrote 0-byte objects. Now reads base64 -> ArrayBuffer.
 // ============================================================================
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
@@ -34,11 +34,17 @@ const SUPABASE_URL = "https://aqgkntulbuqqqjxjafmw.supabase.co";
 
 export function ProfileScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const scrollRef = useRef<ScrollView>(null);
+  const checkInY = useRef(0);
+  const scrolledOnce = useRef(false);
   const cache = useRiskCache();
   const cp = cache.profile;
   const [name, setName] = useState(cp?.name ?? "");
   const [email, setEmail] = useState(cp?.email ?? "");
   const [phone, setPhone] = useState(cp?.phone ?? "");
+  const [phoneOk, setPhoneOk] = useState(false);
+  const [phonePrompt, setPhonePrompt] = useState(false);
   const [tier, setTier] = useState(cp?.tier ?? "basic");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(cp?.avatarUrl ?? null);
   const [uploading, setUploading] = useState(false);
@@ -57,10 +63,19 @@ export function ProfileScreen() {
       setEmail(u.user?.email ?? "");
       if (!uid) return;
       const { data: prof } = await supabase
-        .from("profiles").select("display_name, phone, current_tier, avatar_url").eq("id", uid).single();
+        .from("profiles").select("display_name, phone, phone_verified, current_tier, avatar_url").eq("id", uid).single();
       if (prof) {
         setName(prof.display_name ?? "");
         setPhone(prof.phone ?? "");
+        setPhoneOk(!!prof.phone_verified);
+      }
+      // The Add or Verify pill is switched off from app_settings while testing.
+      // Turning it back on is one SQL update, no deploy.
+      try {
+        const { data: st } = await supabase.rpc("public_settings");
+        setPhonePrompt(!!st && (st as any).phone_prompt_enabled === "1");
+      } catch (_e) {}
+      if (prof) {
         setTier(prof.current_tier ?? "basic");
         setAvatarUrl(prof.avatar_url ?? null);
         cache.setProfile({
@@ -211,7 +226,7 @@ export function ProfileScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Pressable onPress={pickAndUpload} disabled={uploading} style={styles.avatarWrap}>
           <View style={styles.avatar}>
             {avatarUrl ? (
@@ -238,7 +253,29 @@ export function ProfileScreen() {
 
         <View style={styles.infoCard}>
           <InfoRow Icon={Globe} label="Country" value="Nigeria" />
-          <InfoRow Icon={Phone} label="Phone" value={phone || "Not set"} />
+          {/* An email account has no other way to reach verification, so this
+              row is the whole path. Verified shows as a plain row; unverified
+              or missing becomes the prompt, because the number is what tells us
+              who is raising an alarm. */}
+          {phoneOk || !phonePrompt ? (
+            <InfoRow Icon={Phone} label="Phone" value={phone || "Not set"} />
+          ) : (
+            <Pressable
+              style={styles.infoRow}
+              onPress={() => navigation.navigate("PhoneVerify", { mode: "attach", phone })}
+            >
+              <View style={styles.infoIcon}>
+                <Phone size={17} color={colors.ink} strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoLabel}>Phone</Text>
+                <Text style={styles.infoValue}>{phone || "Not set"}</Text>
+              </View>
+              <View style={styles.verifyPill}>
+                <Text style={styles.verifyPillText}>{phone ? "Verify" : "Add"}</Text>
+              </View>
+            </Pressable>
+          )}
           <InfoRow Icon={Crosshair} label="Last flag point" value={point || "No reports yet"} />
           <InfoRow Icon={MapPin} label="Last flag location" value={lastFlag && lastFlag.place ? lastFlag.place : "Not available"} />
           <InfoRow
@@ -264,7 +301,21 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        <View style={styles.slideWrap}>
+        <View
+          style={styles.slideWrap}
+          onLayout={(e) => {
+            // Arriving from Trip Watch with focus=checkin: bring the manual
+            // check-in into view rather than dropping the person at the top of
+            // a long account screen and leaving them to find it.
+            checkInY.current = e.nativeEvent.layout.y;
+            if (route?.params?.focus === "checkin" && !scrolledOnce.current) {
+              scrolledOnce.current = true;
+              setTimeout(() => {
+                scrollRef.current?.scrollTo({ y: Math.max(0, checkInY.current - 90), animated: true });
+              }, 250);
+            }
+          }}
+        >
           <SlideAction
             label="Slide to send a check-in"
             committedLabel="Sent"
@@ -272,7 +323,13 @@ export function ProfileScreen() {
             disabled={checkingIn}
           />
         </View>
-        <Text style={styles.hint}>Quietly share where you are with your panic circle.</Text>
+        <Text style={styles.hint}>
+          This is the manual check-in. Each time you slide it, your location is logged and your panic
+          circle is told where you are. Nothing happens on its own, so you have to remember. For
+          check-ins that continue by themselves while you travel, and that alert your circle if you go
+          quiet, use{" "}
+          <Text style={styles.hintLink} onPress={() => navigation.navigate("TripWatch")}>Trip Watch</Text>.
+        </Text>
 
         <Pressable style={styles.linkRow} onPress={() => navigation.navigate("CheckInInbox")}>
           <Inbox size={18} color={colors.ink} strokeWidth={2} />
@@ -362,6 +419,11 @@ const styles = StyleSheet.create({
     width: "100%", backgroundColor: colors.bgElevated, borderRadius: radius.md,
     paddingHorizontal: spacing.md, marginTop: spacing.lg,
   },
+  verifyPill: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9,
+    backgroundColor: colors.accent,
+  },
+  verifyPillText: { fontSize: 12, lineHeight: 16, fontWeight: "700", color: colors.ink },
   infoRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
     paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
@@ -378,7 +440,8 @@ const styles = StyleSheet.create({
   upgradeText: { fontSize: 12, lineHeight: 16, fontWeight: "600", color: colors.ink },
 
   slideWrap: { width: "100%", marginTop: spacing.xl },
-  hint: { ...type.caption, color: colors.textMuted, marginTop: 8, textAlign: "center" },
+  hint: { ...type.caption, color: colors.textMuted, marginTop: 10, textAlign: "center", lineHeight: 18 },
+  hintLink: { color: colors.ink, fontWeight: "700", textDecorationLine: "underline" },
 
   linkRow: {
     flexDirection: "row", alignItems: "center", gap: spacing.ms,
@@ -389,7 +452,7 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#FFFFFF", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm, alignItems: "center",
   },
   grabber: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.xl },
@@ -409,3 +472,11 @@ const styles = StyleSheet.create({
   },
   sheetBtnText: { ...type.bodyStrong, fontWeight: "600", color: colors.ink },
 });
+
+
+
+
+
+
+
+

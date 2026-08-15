@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Support - FlagRisk v2.1
 // Designed, not rebuilt: no mockup exists.
 //   header | ticket rows with status pill | 48pt ink FAB to compose
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#FFFFFF", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
   sheetGrab: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
@@ -237,3 +237,4 @@ const styles = StyleSheet.create({
   sendText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
   cancel: { ...type.caption, fontWeight: "600", color: colors.textMuted, textAlign: "center", marginTop: spacing.md },
 });
+

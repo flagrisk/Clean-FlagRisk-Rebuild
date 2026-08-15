@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Inbox - FlagRisk v2.1
 // Rebuilt against Figma "Inbox" (3.0 Inbox flow) and the Inbox_1 mockup.
 //   header 36pt round back | title 20/700 centred | 36pt #F0F0F0 round right
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
 
   backdrop: { flex: 1, backgroundColor: "rgba(1,1,20,0.30)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#F6F6F8", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
+    backgroundColor: "#FFFFFF", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     paddingHorizontal: spacing.gutter, paddingTop: spacing.sm,
   },
   grabber: { alignSelf: "center", width: 44, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: spacing.md },
@@ -373,3 +373,4 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: colors.ink },
   emptySub: { fontSize: 10, lineHeight: 14, fontWeight: "400", color: colors.ink, textAlign: "center", marginTop: 8, maxWidth: 220 },
 });
+
