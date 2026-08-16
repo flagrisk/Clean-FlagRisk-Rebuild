@@ -113,7 +113,9 @@ export function RiskBreakdownScreen() {
           ) : null}
 
           <View style={styles.dialWrap}>
-            <RiskGauge score={data.score} size={196} />
+            {/* The gauge prints the band inside itself, and this screen prints it
+                again beneath. Two labels, so the dial keeps quiet here. */}
+            <RiskGauge score={data.score} size={196} showLabel={false} />
             <Text style={[styles.bandWord, { color: bandColor }]}>{bandWord}</Text>
           </View>
 
@@ -225,4 +227,5 @@ const styles = StyleSheet.create({
   howTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: colors.ink },
   howText: { ...type.caption, color: colors.textMuted, lineHeight: 18 },
 });
+
 

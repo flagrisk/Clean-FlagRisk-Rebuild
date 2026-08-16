@@ -6,7 +6,7 @@
 // Data logic is unchanged from the previous build. Presentation only, plus a
 // Nearby Risks section fed by incidents_all (same source the map uses).
 // ============================================================================
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { LocationConsentCard } from "../components/LocationConsentCard";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -163,10 +163,35 @@ export function DashboardScreen() {
   const [unread, setUnread] = useState(0);
   const [tier, setTier] = useState<string>(cp?.tier ?? "basic");
   const [hasCustom, setHasCustom] = useState(false);
+  // Where the person is, in words, under the greeting. Cached against the point
+  // it was looked up at: geocode bills per call and this screen regains focus
+  // constantly, so standing still must cost one lookup rather than forty. The
+  // time floor matters more than the distance one, since driving across the
+  // city would otherwise run to sixty lookups on distance alone.
+  const [place, setPlace] = useState<string | null>(null);
+  const placeAt = useRef<{ lat: number; lng: number; at: number } | null>(null);
   const [factors, setFactors] = useState<string[]>([]);
 
   // The factors come from risk_score_explained, the same function the Risk
   // Summary drawer reads, so the card and the drawer can never disagree.
+  const refreshPlace = useCallback(async (lat: number, lng: number) => {
+    const prev = placeAt.current;
+    if (prev) {
+      const moved = metresBetween(prev.lat, prev.lng, lat, lng);
+      const aged = Date.now() - prev.at;
+      if (moved < 300 && aged < 10 * 60 * 1000) return;
+      if (aged < 60 * 1000) return;   // never more than once a minute
+    }
+    placeAt.current = { lat, lng, at: Date.now() };
+    try {
+      const { data: geo } = await supabase.functions.invoke("geocode", { body: { lat, lng } });
+      // The community only. geocode composes "area, city" when both are known,
+      // which reads correctly on Profile but is too long for a line under the
+      // greeting. Profile keeps the full label; this takes the first part.
+      if (geo && geo.ok && geo.label) setPlace(String(geo.label).split(",")[0].trim());
+    } catch (_e) { /* a missing place name is not worth surfacing */ }
+  }, []);
+
   const loadFactors = useCallback(async (wkt: string) => {
     try {
       const { data } = await supabase.rpc("risk_score_explained", {
@@ -246,6 +271,7 @@ export function DashboardScreen() {
         if (status === "granted") {
           const p = await Location.getCurrentPositionAsync({});
           setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+          refreshPlace(p.coords.latitude, p.coords.longitude);
           const wkt = "SRID=4326;POINT(" + p.coords.longitude + " " + p.coords.latitude + ")";
           setCoords(wkt);
           await supabase.rpc("refresh_user_risk_score", { p_user_id: uid, p_location: wkt });
@@ -276,6 +302,7 @@ export function DashboardScreen() {
         if (status !== "granted") { running = false; return; }
         const p = await Location.getCurrentPositionAsync({});
         setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+        refreshPlace(p.coords.latitude, p.coords.longitude);
         const wkt = "SRID=4326;POINT(" + p.coords.longitude + " " + p.coords.latitude + ")";
         setCoords(wkt);
         await supabase.rpc("refresh_user_risk_score", { p_user_id: uid, p_location: wkt });
@@ -330,6 +357,12 @@ export function DashboardScreen() {
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={styles.hello} numberOfLines={1}>Hi, {name}</Text>
+              {place ? (
+                <View style={styles.placeRow}>
+                  <MapPin size={11} color={colors.textMuted} strokeWidth={2} />
+                  <Text style={styles.placeText} numberOfLines={1}>{place}</Text>
+                </View>
+              ) : null}
             </View>
             <Pressable onPress={() => navigation.navigate("Inbox")} style={styles.headBtn} hitSlop={8}>
               <Bell size={19} color={colors.ink} strokeWidth={2} />
@@ -491,6 +524,8 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingTop: spacing.sm, marginBottom: spacing.md },
   hello: { ...type.subheading, color: colors.inkDeep },
+  placeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  placeText: { fontSize: 11, lineHeight: 15, color: colors.textMuted, flexShrink: 1 },
   headBtn: {
     width: 40, height: 40, borderRadius: 20, backgroundColor: "#FEFEFE",
     alignItems: "center", justifyContent: "center", ...elevation.hairline,
@@ -557,6 +592,9 @@ const styles = StyleSheet.create({
   rowTitle: { ...type.label, color: colors.ink, textTransform: "capitalize" },
   rowSub: { ...type.caption, color: colors.textMuted, marginTop: 2 },
 });
+
+
+
 
 
 

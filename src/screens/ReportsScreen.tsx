@@ -202,14 +202,19 @@ export function ReportsScreen() {
                 <View style={styles.thumb}>
                   <Icon size={20} color={chip.fg} strokeWidth={2} />
                 </View>
+                {/* The time joins the title row rather than holding a lane down
+                    the right, so the line beneath runs the full width instead
+                    of truncating against empty space. */}
                 <View style={{ flex: 1 }}>
                   <View style={styles.rowTop}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{humanize(item.category_id)}</Text>
                     <View style={[styles.chip, { backgroundColor: chip.bg }]}>
                       <Text style={[styles.chipText, { color: chip.fg }]}>{chip.label}</Text>
                     </View>
+                    <View style={{ flex: 1 }} />
+                    <Text style={styles.rowTime}>{timeAgo(item.occurred_at)}</Text>
                   </View>
-                  <Text style={styles.rowSub} numberOfLines={1}>
+                  <Text style={styles.rowSub} numberOfLines={2}>
                     Visibility: {humanize(item.alert_level) || "On the map"}
                   </Text>
                   {item.media_url ? (
@@ -219,7 +224,6 @@ export function ReportsScreen() {
                     </View>
                   ) : null}
                 </View>
-                <Text style={styles.rowTime}>{timeAgo(item.occurred_at)}</Text>
               </Pressable>
             );
           }}
@@ -324,8 +328,8 @@ const styles = StyleSheet.create({
   dayLabel: { fontSize: 12, lineHeight: 24, fontWeight: "600", color: colors.ink, marginBottom: spacing.xs },
 
   row: {
-    flexDirection: "row", alignItems: "center", gap: spacing.ms,
-    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexDirection: "row", alignItems: "flex-start", gap: spacing.ms,
+    paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   thumb: {
     width: 48, height: 48, borderRadius: radius.sm, backgroundColor: "#F0F0F0",
@@ -338,7 +342,7 @@ const styles = StyleSheet.create({
   rowSub: { ...type.caption, color: colors.textMuted, marginTop: 3 },
   attachRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   attachText: { ...type.caption, color: colors.textMuted },
-  rowTime: { ...type.caption, color: colors.textFaint, alignSelf: "flex-start", marginTop: 2 },
+  rowTime: { ...type.caption, color: colors.textFaint },
 
   empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
   emptyTitle: { ...type.subheading, color: colors.ink },
@@ -370,4 +374,7 @@ const styles = StyleSheet.create({
   viewerClose: { position: "absolute", top: 50, right: 20, zIndex: 10, width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   viewerMedia: { width: "100%", height: "80%" },
 });
+
+
+
 

@@ -85,8 +85,11 @@ export function NotificationsScreen() {
     const rows = (data ?? []) as Notif[];
     const ids = Array.from(new Set(rows.map((r) => r.actor_id).filter(Boolean))) as string[];
     if (ids.length > 0) {
-      const { data: people } = await supabase
-        .from("profiles").select("id, display_name, avatar_url").in("id", ids);
+      // people_cards, not a direct read. The policy that allowed this returned
+      // the whole profile row to any connected member: phone, tier, credibility,
+      // risk score. Only the name and the avatar are ever shown, so only those
+      // two leave the database.
+      const { data: people } = await supabase.rpc("people_cards", { p_ids: ids });
       const byId: Record<string, any> = {};
       (people ?? []).forEach((p: any) => { byId[p.id] = p; });
       rows.forEach((r) => {
@@ -234,20 +237,29 @@ export function NotificationsScreen() {
                     <Icon size={18} color={meta.fg} strokeWidth={2} />
                   </View>
                 )}
+                {/* The time sits in the title row, not in a column of its own.
+                    It used to hold a lane down the whole right side, so the
+                    body truncated against it while the space beneath the time
+                    stayed empty. */}
                 <View style={{ flex: 1 }}>
                   <View style={styles.rowTop}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{item.title}</Text>
                     <View style={[styles.tag, { backgroundColor: meta.bg }]}>
                       <Text style={[styles.tagText, { color: meta.fg }]}>{meta.label}</Text>
                     </View>
+                    <View style={{ flex: 1 }} />
+                    <Text style={styles.rowTime}>{timeAgo(item.created_at)}</Text>
+                    {!item.is_read ? <View style={[styles.pip, { backgroundColor: meta.fg }]} /> : null}
                   </View>
+                  {/* Most bodies are a sentence and two lines is right. The
+                      provisional and hidden notices explain a rule and need
+                      their whole selves, so they are allowed to run on. */}
                   {item.body ? (
-                    <Text style={styles.rowBody} numberOfLines={2}>{item.body}</Text>
+                    <Text
+                      style={styles.rowBody}
+                      numberOfLines={item.kind === "report_provisional" || item.kind === "report_hidden" ? 0 : 2}
+                    >{item.body}</Text>
                   ) : null}
-                </View>
-                <View style={styles.rowRight}>
-                  <Text style={styles.rowTime}>{timeAgo(item.created_at)}</Text>
-                  {!item.is_read ? <View style={[styles.pip, { backgroundColor: meta.fg }]} /> : null}
                 </View>
               </Pressable>
             );
@@ -336,7 +348,7 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: "row", alignItems: "flex-start", gap: spacing.ms,
-    paddingVertical: spacing.ms, borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   rowTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
@@ -345,6 +357,7 @@ const styles = StyleSheet.create({
   tagText: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
   rowBody: { ...type.caption, color: colors.textMuted, marginTop: 4, lineHeight: 17 },
   rowRight: { alignItems: "flex-end", gap: 6, paddingTop: 2 },
+  pipInline: { marginLeft: 6 },
   rowTime: { ...type.caption, color: colors.textFaint },
   pip: { width: 8, height: 8, borderRadius: 4 },
 
@@ -373,4 +386,8 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: colors.ink },
   emptySub: { fontSize: 10, lineHeight: 14, fontWeight: "400", color: colors.ink, textAlign: "center", marginTop: 8, maxWidth: 220 },
 });
+
+
+
+
 

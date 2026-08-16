@@ -27,7 +27,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 import {
   TriangleAlert, Gauge, Camera, Video as VideoIcon, Layers, MapPin, MapPinOff,
-  Users, Check, X, Paperclip, ArrowLeft, LocateFixed, Plus, MessageSquare, Siren,
+  Users, Check, X, Paperclip, ArrowLeft, LocateFixed, Plus, MessageSquare, Siren, Car,
 } from "lucide-react-native";
 import { Image } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -245,6 +245,31 @@ export function MapFlagScreen() {
     startReportAt(latitude, longitude);
   }
 
+  // Take a live position rather than trusting the watcher's state. That state
+  // updates every 15 metres and drops any fix over 100 metres accuracy, so it
+  // can sit minutes behind while log_location writes a newer one. The server
+  // then compares the two and refuses a report standing right on top of it.
+  async function startReportHere() {
+    if (locationOff) {
+      return showAlert({
+        title: "Location needed",
+        message: "Switch your location on before flagging a risk. You can only report what is around you.",
+        tone: "error",
+      });
+    }
+    try {
+      const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const c = { lat: p.coords.latitude, lng: p.coords.longitude };
+      setCoords(c);
+      // Write it before the report goes out, so reporter_is_at compares against
+      // this position and not one from ten minutes ago.
+      await supabase.rpc("log_location", { p_lat: c.lat, p_lng: c.lng });
+      startReportAt(c.lat, c.lng);
+    } catch (_e) {
+      startReportAt(coords.lat, coords.lng);
+    }
+  }
+
   function startReportAt(lat: number, lng: number) {
     const away = metresBetween(coords.lat, coords.lng, lat, lng);
     if (locationOff) {
@@ -413,7 +438,13 @@ export function MapFlagScreen() {
       const json = await res.json();
       setSending(false);
       if (!res.ok || !json.ok) {
-        return showAlert({ title: "Could not send", message: json.error ?? "Unknown error", tone: "error" });
+        // The function returns a code in error and a sentence in message. This
+        // showed the code, so a refusal read as "report_too_far".
+        return showAlert({
+          title: "Could not send",
+          message: json.message ?? json.detail ?? json.error ?? "Please try again.",
+          tone: "error",
+        });
       }
       // Report what the engine decided, not what the reporter selected.
       const inc = json.incident;
@@ -463,7 +494,10 @@ export function MapFlagScreen() {
           showsMyLocationButton={false}
           toolbarEnabled={false}
           mapType={mapType}
-          customMapStyle={mapType === "standard" ? SILVER_MAP_STYLE : []}
+          // No custom style. The silver map kept incident markers the only
+          // strong colour on the surface, but it also stripped the landmarks
+          // people navigate by. Trip Watch uses the default Google map and
+          // reads better for it, so this matches.
         >
           {plotted.map((i) => {
             const dot = SEVERITY_COLORS[i.severity ?? ""] ?? colors.riskHigh;
@@ -498,14 +532,7 @@ export function MapFlagScreen() {
             <ArrowLeft size={20} color={colors.ink} strokeWidth={2} />
           </Pressable>
           <Text style={styles.headTitle}>LiveMap</Text>
-          <Pressable
-            onPress={() => mapRef.current?.animateToRegion(
-              { latitude: coords.lat, longitude: coords.lng, ...INITIAL_DELTA }, 500)}
-            style={styles.headBtnFilled}
-            hitSlop={8}
-          >
-            <LocateFixed size={18} color={colors.ink} strokeWidth={2} />
-          </Pressable>
+          <View style={{ width: 36 }} />
         </View>
 
         <View style={styles.anchorRow}>
@@ -528,23 +555,44 @@ export function MapFlagScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable
-          onPress={() => setMapType((t) => (t === "standard" ? "hybrid" : "standard"))}
-          style={styles.mapTypeBtn}
-        >
-          <Layers size={19} color={mapType === "hybrid" ? colors.ink : colors.textMuted} strokeWidth={2} />
-        </Pressable>
+
       </SafeAreaView>
 
+      {/* One column of controls against the right edge, running up from the
+          bottom. They were in three different places before: recentre in the
+          header, map type loose in the overlay, report pinned to the bottom.
+          Grouping them puts the primary action under the thumb and the rest
+          within reach of it. */}
+      <View style={[styles.controls, { bottom: insets.bottom + 24 }]}>
+        <Pressable style={styles.ctrl} hitSlop={10} onPress={() => navigation.navigate("TripWatch")} hitSlop={8}>
+          <Car size={17} color={colors.accent} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable
+          style={styles.ctrl}
+          onPress={() => setMapType((t) => (t === "standard" ? "hybrid" : "standard"))}
+          hitSlop={10}
+        >
+          <Layers size={17} color={mapType === "hybrid" ? colors.accent : "rgba(212,255,36,0.55)"} strokeWidth={2.2} />
+        </Pressable>
+        <Pressable
+          style={styles.ctrl}
+          onPress={() => mapRef.current?.animateToRegion(
+            { latitude: coords.lat, longitude: coords.lng, ...INITIAL_DELTA }, 500)}
+          hitSlop={8}
+        >
+          <LocateFixed size={17} color={colors.accent} strokeWidth={2.2} />
+        </Pressable>
+      </View>
+
       <Pressable
-        style={[styles.reportFab, { bottom: insets.bottom + 108 }]}
-        onPress={() => startReportAt(coords.lat, coords.lng)}
+        style={[styles.ctrl, styles.reportFab, { bottom: insets.bottom + 24 }]}
+        onPress={startReportHere}
         hitSlop={10}
       >
-        <Plus size={26} color={colors.accent} strokeWidth={2.6} />
+        <Plus size={19} color={colors.accent} strokeWidth={2.6} />
       </Pressable>
 
-      <View style={[styles.hint, { bottom: insets.bottom + 112 }]} pointerEvents="none">
+      <View style={[styles.hint, { bottom: insets.bottom + 24 }]} pointerEvents="none">
         <Text style={styles.hintText}>
           {plotted.length} risk{plotted.length === 1 ? "" : "s"} nearby this current location.
           Tap a coloured marker to open a risk report. Clicking the + button initiates a report
@@ -630,10 +678,10 @@ export function MapFlagScreen() {
                   </Pressable>
                 </ScrollView>
 
+                {/* One action. Cancel sat beside it and competed with the thing
+                    the person came here to do. The backdrop and the back gesture
+                    still close the sheet. */}
                 <View style={styles.actions}>
-                  <Pressable style={styles.ghostBtn} onPress={closeSheet}>
-                    <Text style={styles.ghostText}>Cancel</Text>
-                  </Pressable>
                   <Pressable
                     style={[styles.sendBtn, { flex: 1, marginTop: 0 }, sending && { opacity: 0.7 }]}
                     onPress={sendAlert}
@@ -827,9 +875,25 @@ const styles = StyleSheet.create({
   anchorDot: { width: 7, height: 7, borderRadius: 4 },
   anchorText: { ...type.label, fontWeight: "600", color: colors.ink },
 
+  controls: {
+    position: "absolute", right: spacing.gutter,
+    alignItems: "center", gap: 12,
+    // sits directly above the report button, which is 60 tall
+    marginBottom: 50,
+  },
+  // Ink discs with lime glyphs, all four the same size. 38 with a hitSlop of 10
+  // keeps the touch target at 58, well clear of the 48 minimum, while the disc
+  // itself reads as a control rather than a button.
+  ctrl: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: colors.ink,
+    alignItems: "center", justifyContent: "center", ...elevation.card,
+  },
+  // Same size and shape as the other controls now, so the column reads as one
+  // set of tools rather than a big button with three small ones stacked on it.
+  // Ink keeps it as the primary action.
   reportFab: {
     position: "absolute", right: spacing.gutter,
-    width: 60, height: 60, borderRadius: 30, backgroundColor: colors.ink,
+    backgroundColor: colors.ink,
     alignItems: "center", justifyContent: "center", ...elevation.sheet,
   },
 
@@ -953,5 +1017,16 @@ const styles = StyleSheet.create({
   stackLabel: { flex: 1, ...type.label, fontWeight: "500", color: colors.ink, textTransform: "capitalize" },
   stackState: { ...type.caption, color: colors.textMuted },
 });
+
+
+
+
+
+
+
+
+
+
+
 
 

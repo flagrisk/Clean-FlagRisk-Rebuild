@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Shared auth pieces - FlagRisk v2.1
 //
 // Design C. The anatomy comes from the references: a warm ground, the mark
@@ -19,7 +19,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft, CircleQuestionMark } from "lucide-react-native";
 import { colors, type } from "../theme";
 
 // The brand's warm surface. Kept local rather than added to the palette,
@@ -100,6 +100,24 @@ export function AuthShell({
             />
           )}
 
+          {/* Help belongs before sign in as much as after. Someone locked out,
+              unsure what the app does, or reading about how their location is
+              used should not have to get past the door first. HelpScreen is
+              registered in both stacks already. */}
+          {/* Not on the verify and reset screens: those show a back arrow and a
+              centred title, and this would sit on top of them. Someone mid
+              verification is inside a task, not looking for the manual. */}
+          {headerTitle ? null : (
+            <Pressable
+              onPress={() => navigation.navigate("Help")}
+              style={styles.help}
+              hitSlop={10}
+            >
+              <CircleQuestionMark size={17} color={colors.textMuted} strokeWidth={2} />
+              <Text style={styles.helpText}>Help</Text>
+            </Pressable>
+          )}
+
           <View style={styles.card}>
             <Text style={styles.title}>{title}</Text>
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -123,6 +141,13 @@ const styles = StyleSheet.create({
   // The logo tile, lime on Night Indigo. Square, 22 percent radius baked into
   // the asset, so it matches the app icon exactly.
   mark: { width: 56, height: 56, alignSelf: "center", marginTop: 30, marginBottom: 26 },
+  // Top right, above the card, out of the way of the form.
+  help: {
+    position: "absolute", top: 12, right: 4,
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 10, paddingVertical: 6,
+  },
+  helpText: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: colors.textMuted },
 
   card: {
     backgroundColor: colors.bg, borderRadius: 22, padding: 22,
@@ -141,3 +166,5 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: colors.textMuted },
   chipTextOn: { color: colors.ink },
 });
+
+

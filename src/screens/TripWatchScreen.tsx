@@ -424,10 +424,12 @@ export function TripWatchScreen() {
 
       <View style={styles.sheet}>
         <View style={styles.sheetGrab} />
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.lg }}>
+        <Text style={styles.sheetTitle}>
+          {step === "details" ? "Trip details" : "Review summary"}
+        </Text>
+        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing.md }}>
           {step === "details" ? (
             <>
-              <Text style={styles.sheetTitle}>Trip details</Text>
               <Text style={styles.sheetSub}>Share trip details so your contacts can follow and be alerted.</Text>
 
               <Text style={styles.label}>Destination</Text>
@@ -488,15 +490,9 @@ export function TripWatchScreen() {
                 })}
               </View>
 
-              <Pressable style={styles.primaryBtn} onPress={() => setStep("review")}>
-                <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Text style={styles.primaryText}>Next</Text>
-                <ChevronRight size={18} color={colors.accent} strokeWidth={2.4} />
-              </Pressable>
             </>
           ) : (
             <>
-              <Text style={styles.sheetTitle}>Review summary</Text>
               <Text style={styles.sheetSub}>Review your trip summary.</Text>
 
               <View style={styles.summaryCard}>
@@ -564,23 +560,37 @@ export function TripWatchScreen() {
                   Pick at least one person above. Trip Watch has no one to tell until you do.
                 </Text>
               ) : null}
-              <Pressable
-                style={[styles.primaryBtn, (starting || selected.length === 0) && { opacity: 0.45 }]}
-                onPress={startTrip}
-                disabled={starting || selected.length === 0}
-              >
-                <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
-                <Text style={styles.primaryText}>
-                  {starting
-                    ? "Starting"
-                    : selected.length === 0
-                      ? "Start Trip Watch"
-                      : "Start, telling " + selected.length + (selected.length === 1 ? " person" : " people")}
-                </Text>
-              </Pressable>
             </>
           )}
         </ScrollView>
+
+        {/* The action stays put. It used to sit at the end of the scrolling
+            content, so on a long form the button scrolled away and the person
+            had to hunt for it. */}
+        <View style={[styles.sheetFooter, { paddingBottom: insets.bottom + spacing.md }]}>
+          {step === "details" ? (
+            <Pressable style={[styles.primaryBtn, { marginTop: 0 }]} onPress={() => setStep("review")}>
+              <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+              <Text style={styles.primaryText}>Next</Text>
+              <ChevronRight size={18} color={colors.accent} strokeWidth={2.4} />
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.primaryBtn, { marginTop: 0 }, (starting || selected.length === 0) && { opacity: 0.45 }]}
+              onPress={startTrip}
+              disabled={starting || selected.length === 0}
+            >
+              <LinearGradient colors={PRIMARY_GRAD} locations={PRIMARY_STOPS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+              <Text style={styles.primaryText}>
+                {starting
+                  ? "Starting"
+                  : selected.length === 0
+                    ? "Start Trip Watch"
+                    : "Start, telling " + selected.length + (selected.length === 1 ? " person" : " people")}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -662,12 +672,19 @@ const styles = StyleSheet.create({
   },
   pairText: { ...type.label, fontWeight: "600" },
 
+  sheetFooter: {
+    paddingTop: spacing.md,
+    borderTopWidth: 1, borderTopColor: "rgba(20,21,42,0.08)",
+  },
   primaryBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     height: 52, borderRadius: radius.md, backgroundColor: "transparent", overflow: "hidden", marginTop: spacing.xl,
   },
   primaryText: { ...type.bodyStrong, fontWeight: "600", color: colors.accent},
 });
+
+
+
 
 
 

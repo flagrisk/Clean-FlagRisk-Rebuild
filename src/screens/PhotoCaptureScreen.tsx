@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Photo Capture - take a still image as evidence and upload to report-evidence.
 // Guards against double-fire and not-yet-ready camera. Returns storage path via
 // route.params.onCaptured(path).
@@ -32,6 +32,9 @@ export function PhotoCaptureScreen() {
   }, []);
   const [capturing, setCapturing] = useState(false);
   const [preview, setPreview] = useState(null);
+  // The bytes of the frame just taken. Held here so the upload never has to go
+  // back to disk for them.
+  const [shot, setShot] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -46,8 +49,12 @@ export function PhotoCaptureScreen() {
     if (!cameraRef.current || !camReady) { showAlert({ title: "One moment", message: "The camera is still starting. Try again in a second." }); return; }
     setCapturing(true);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false });
-      if (photo && photo.uri) setPreview(photo.uri);
+      // base64 true: the frame comes back as bytes rather than a path. Reading
+      // a path meant a later step could fetch a different file, and it did:
+      // Gemini described a laptop keyboard on a flood report, and the keyboard
+      // is what actually reached storage. No path, no wrong file.
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.6, base64: true, skipProcessing: false });
+      if (photo && photo.uri && photo.base64) { setPreview(photo.uri); setShot(photo.base64); }
       else showAlert({ title: "Capture failed", message: "No image was produced. Please try again.", tone: "error" });
     } catch (e) {
       showAlert({ title: "Capture failed", message: "Please hold steady and try again.", tone: "error" });
@@ -68,19 +75,25 @@ export function PhotoCaptureScreen() {
       // Downscale first. A modern phone writes a 3 to 6 MB frame at quality 0.7,
       // which is what made evidence crawl on mobile data. 1600px on the long
       // edge is more than enough to read a street sign and lands near 250 KB.
-      const shrunk = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 1600 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      uri = shrunk.uri;
+
 
       // Read the local file into real bytes. fetch(uri).blob() does NOT work on
       // React Native for file:// URIs - it yields a registry-backed Blob that
       // XHR sends as an empty body, so the object lands in Storage at 0 bytes
       // and every later read renders blank. Base64 -> ArrayBuffer is the path
       // that works (same as SupportThreadScreen).
-      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+      // The camera already handed us these bytes. Nothing is read from disk and
+      // nothing is resized: both steps sat between the shutter and the upload,
+      // and one of them was substituting a different image. Gemini described a
+      // laptop keyboard on a flood report, and a keyboard is what had actually
+      // reached storage.
+      //
+      // The cost is size. A frame at quality 0.6 lands near 1 MB where the
+      // resize used to reach 250 KB, which is real money on Nigerian mobile
+      // data. Correct evidence at 1 MB beats fast evidence of the wrong thing,
+      // and the resize can return once it can be trusted.
+      const b64 = shot;
+      if (!b64) throw new Error("The captured image was lost. Please retake it.");
       const bytes = decodeBase64(b64);
       if (!bytes || bytes.byteLength === 0) throw new Error("The captured image was empty. Please retake it.");
       const uploadUrl = "https://aqgkntulbuqqqjxjafmw.supabase.co/storage/v1/object/report-evidence/" + path;
@@ -147,7 +160,7 @@ export function PhotoCaptureScreen() {
           </>
         ) : (
           <View style={styles.reviewRow}>
-            <Pressable style={styles.retakeBtn} onPress={() => setPreview(null)} disabled={uploading}><Text style={styles.retakeText}>Retake</Text></Pressable>
+            <Pressable style={styles.retakeBtn} onPress={() => { setPreview(null); setShot(null); }} disabled={uploading}><Text style={styles.retakeText}>Retake</Text></Pressable>
             <Pressable style={styles.useBtn} onPress={() => upload(preview)} disabled={uploading}><Text style={styles.useText}>{uploading ? "Uploading" : "Use photo"}</Text></Pressable>
           </View>
         )}
@@ -177,3 +190,5 @@ const styles = StyleSheet.create({
   useBtn: { flex: 1, height: 52, borderRadius: radius.md, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   useText: { ...type.label, fontWeight: "600", color: colors.ink },
 });
+
+

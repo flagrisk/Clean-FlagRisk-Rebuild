@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Bottom navigation - FlagRisk v2.1
 // Built from Figma component set "Flagrisk Bottom Nav" (node 123:16728).
 //   bar #F5F5F5, 63pt + safe area | items 56x40 | icons 20 | labels 10pt
@@ -50,6 +50,11 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     );
   };
 
+  // The map carries its own column of controls now, and the bar on top of that
+  // was one set of options too many. The screen keeps a back arrow in its
+  // header, so hiding this does not trap anyone.
+  if (onMap) return null;
+
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
       <View style={styles.row}>
@@ -93,3 +98,4 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center", ...elevation.hairline,
   },
 });
+
