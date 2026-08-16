@@ -15,7 +15,7 @@
 // findings: a tester set a very weak password and the app accepted it silently.
 // ============================================================================
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Check } from "lucide-react-native";
 import { supabase } from "../../lib/supabase";
@@ -30,6 +30,11 @@ const PRIMARY_STOPS = [0, 0.45, 1] as const;
 // Same rules as normalize_phone in the database and in the SMS hook. All three
 // must agree, or an account created as +234814... cannot be signed into as
 // 0814...
+// The same documents Settings links to. Duplicated rather than shared because
+// two screens is not yet a module, but they must not drift apart.
+const TERMS_URL = "https://flagrisk.org/terms";
+const PRIVACY_URL = "https://flagrisk.org/privacy";
+
 function normalize(raw: string, cc = "234"): string {
   let d = (raw || "").replace(/[^0-9]/g, "");
   if (!d) return "";
@@ -242,15 +247,27 @@ export function CreateAccountScreen({ navigation }: any) {
         ) : null}
       </View>
 
-      <Pressable style={styles.terms} onPress={() => setAgreed((a) => !a)}>
-        <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
-          {agreed ? <Check size={13} color={colors.accent} strokeWidth={3} /> : null}
-        </View>
-        <Text style={styles.termsText}>
-          I agree to the FlagRisk <Text style={styles.termsLink}>Terms and Conditions</Text> and{" "}
-          <Text style={styles.termsLink}>Privacy Policy</Text>.
+      {/* The two links used to sit inside the checkbox Pressable, so tapping
+          either only toggled the box. Nobody could read what they were agreeing
+          to. onPress on the inner Text opens the document; the row around it
+          still toggles. Same URLs Settings uses. */}
+      <View style={styles.terms}>
+        <Pressable onPress={() => setAgreed((a) => !a)} hitSlop={8}>
+          <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
+            {agreed ? <Check size={13} color={colors.accent} strokeWidth={3} /> : null}
+          </View>
+        </Pressable>
+        <Text style={styles.termsText} onPress={() => setAgreed((a) => !a)}>
+          I agree to the FlagRisk{" "}
+          <Text style={styles.termsLink} onPress={() => Linking.openURL(TERMS_URL)}>
+            Terms and Conditions
+          </Text>
+          {" "}and{" "}
+          <Text style={styles.termsLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+            Privacy Policy
+          </Text>.
         </Text>
-      </Pressable>
+      </View>
     </AuthShell>
   );
 }
@@ -268,7 +285,7 @@ const styles = StyleSheet.create({
   },
   checkboxOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   termsText: { flex: 1, ...type.caption, color: colors.textMuted, lineHeight: 18 },
-  termsLink: { color: colors.ink, fontWeight: "600" },
+  termsLink: { color: colors.ink, fontWeight: "600", textDecorationLine: "underline" },
   cta: {
     height: 54, borderRadius: 13,
     backgroundColor: "transparent", overflow: "hidden",
@@ -278,6 +295,8 @@ const styles = StyleSheet.create({
   switch: { fontSize: 13, lineHeight: 18, color: colors.textMuted, textAlign: "center" },
   switchLink: { fontWeight: "700", color: colors.ink },
 });
+
+
 
 
 

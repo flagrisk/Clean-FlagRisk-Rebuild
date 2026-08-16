@@ -80,7 +80,10 @@ export function AuthShell({
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          // Only centre when there is no header. Verify and reset show a back
+          // arrow and a title, and those belong at the top of the screen rather
+          // than floating in the middle with the card.
+          contentContainerStyle={[styles.scroll, headerTitle ? { justifyContent: "flex-start" } : null]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -132,7 +135,14 @@ export function AuthShell({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: PARCHMENT },
-  scroll: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 },
+  // The card sits in the middle of the screen rather than pinned under the
+  // header. flexGrow lets the content container fill the viewport and
+  // justifyContent centres it, while still scrolling when the keyboard is up on
+  // a short screen or when Create Account carries more fields.
+  scroll: {
+    flexGrow: 1, justifyContent: "center",
+    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20,
+  },
 
   header: { height: 44, flexDirection: "row", alignItems: "center", marginBottom: 8 },
   headBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
@@ -166,5 +176,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: colors.textMuted },
   chipTextOn: { color: colors.ink },
 });
+
+
 
 
